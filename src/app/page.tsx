@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from '@/components/Header';
 import { SummaryTiles } from '@/components/SummaryTiles';
 import { TaskTree } from '@/components/TaskTree';
@@ -10,174 +10,9 @@ import { TaskNode, UserRole } from '@/lib/types';
 import { calculateTreeStats, buildTaskTree } from '@/lib/calc';
 import { supabase } from '@/lib/supabase';
 
-const DEMO_FALLBACK_TASKS: TaskNode[] = [
-  {
-    id: 'sub-1',
-    projectId: 'master',
-    projectName: 'Master Project',
-    subprojectName: 'AVI 7080 Move panels',
-    wbs: '1',
-    outlineLevel: 1,
-    name: 'AVI 7080 Move panels from clean area to new MCC',
-    isSummary: true,
-    quotedHours: 120,
-    children: [
-      {
-        id: 'sub-1-1',
-        projectId: 'master',
-        projectName: 'Master Project',
-        subprojectName: 'AVI 7080 Move panels',
-        wbs: '1.1',
-        outlineLevel: 2,
-        name: 'DJB-ZONE111-01 (1000 x 800 x 330)',
-        isSummary: true,
-        quotedHours: 24,
-        children: [
-          {
-            id: 'task-101',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.1',
-            outlineLevel: 3,
-            name: 'Materials on site',
-            isSummary: false,
-            quotedHours: 0,
-            isLocked: true,
-            doneByName: 'Lindani',
-          },
-          {
-            id: 'task-102',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.2',
-            outlineLevel: 3,
-            name: 'Cable run / installed',
-            isSummary: false,
-            quotedHours: 4.8,
-            isLocked: true,
-            doneByName: 'Lindani',
-          },
-          {
-            id: 'task-103',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.3',
-            outlineLevel: 3,
-            name: 'Cable glanded (both ends)',
-            isSummary: false,
-            quotedHours: 4.8,
-            isLocked: false,
-          },
-          {
-            id: 'task-104',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.4',
-            outlineLevel: 3,
-            name: 'JB built',
-            isSummary: false,
-            quotedHours: 4.8,
-            isLocked: false,
-          },
-          {
-            id: 'task-105',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.5',
-            outlineLevel: 3,
-            name: 'Cable labels fitted',
-            isSummary: false,
-            quotedHours: 2.4,
-            isLocked: false,
-          },
-          {
-            id: 'task-106',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.6',
-            outlineLevel: 3,
-            name: 'Terminated at JB',
-            isSummary: false,
-            quotedHours: 3.6,
-            isLocked: false,
-          },
-          {
-            id: 'task-107',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.1.7',
-            outlineLevel: 3,
-            name: 'Terminated at MCC',
-            isSummary: false,
-            quotedHours: 3.6,
-            isLocked: false,
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'sub-2',
-    projectId: 'master',
-    projectName: 'Master Project',
-    subprojectName: 'Buckman 7033',
-    wbs: '2',
-    outlineLevel: 1,
-    name: 'Buckman 7033 Bentonite Makedown system 525 vac',
-    isSummary: true,
-    quotedHours: 85,
-    children: [
-      {
-        id: 'sub-2-1',
-        projectId: 'master',
-        projectName: 'Master Project',
-        subprojectName: 'Buckman 7033',
-        wbs: '2.1',
-        outlineLevel: 2,
-        name: 'Main Feed & Marshalling Panel',
-        isSummary: true,
-        quotedHours: 18,
-        children: [
-          {
-            id: 'task-301',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'Buckman 7033',
-            wbs: '2.1.1',
-            outlineLevel: 3,
-            name: 'Containment and bracket mounting',
-            isSummary: false,
-            quotedHours: 6.0,
-            isLocked: false,
-          },
-          {
-            id: 'task-302',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'Buckman 7033',
-            wbs: '2.1.2',
-            outlineLevel: 3,
-            name: 'Panel installation and glanding',
-            isSummary: false,
-            quotedHours: 12.0,
-            isLocked: false,
-          },
-        ],
-      },
-    ],
-  },
-];
-
 export default function TrackerApp() {
   const [role, setRole] = useState<UserRole>('owner');
-  const [tasks, setTasks] = useState<TaskNode[]>(DEMO_FALLBACK_TASKS);
+  const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
   const [activeTab, setActiveTab] = useState('all');
   const [pendingTicks, setPendingTicks] = useState<
     Record<string, { doneByName: string; tickedAt: string }>
@@ -192,7 +27,8 @@ export default function TrackerApp() {
       const { data: dbTasks, error: taskErr } = await supabase
         .from('tracker_tasks')
         .select('*')
-        .order('sort_order', { ascending: true });
+        .order('sort_order', { ascending: true })
+        .limit(3000);
 
       if (taskErr || !dbTasks || dbTasks.length === 0) {
         return;
@@ -232,10 +68,10 @@ export default function TrackerApp() {
 
       const nestedTree = buildTaskTree(flatNodes);
       if (nestedTree.length > 0) {
-        setTasks(nestedTree);
+        setAllTasks(nestedTree);
       }
     } catch (e) {
-      console.warn('Could not load Supabase data, running with local store', e);
+      console.warn('Could not load Supabase data:', e);
     }
   }, []);
 
@@ -251,7 +87,6 @@ export default function TrackerApp() {
       console.error('Failed to load pending ticks from localStorage', e);
     }
 
-    // Subscribe to Realtime updates for both progress and task definitions
     const channel = supabase
       .channel('realtime_tracker_changes')
       .on(
@@ -281,6 +116,57 @@ export default function TrackerApp() {
       window.removeEventListener('offline', handleOffline);
     };
   }, [loadSupabaseData]);
+
+  // Extract Major Subproject Sections (Outline Level 2 or Root Children)
+  const sections = useMemo(() => {
+    if (allTasks.length === 0) return [];
+    
+    // If root task is a single project wrapper with children, use its children as the main sections
+    if (allTasks.length === 1 && allTasks[0].children && allTasks[0].children.length > 0) {
+      return allTasks[0].children;
+    }
+    
+    // Otherwise check if any root has multiple sub-children
+    const found: TaskNode[] = [];
+    for (const r of allTasks) {
+      if (r.children && r.children.length > 0 && r.children.some(c => c.isSummary)) {
+        found.push(...r.children);
+      } else {
+        found.push(r);
+      }
+    }
+    return found;
+  }, [allTasks]);
+
+  // Dynamic Navigation Tabs
+  const totalStats = useMemo(() => calculateTreeStats(sections), [sections]);
+
+  const tabs = useMemo(() => {
+    return [
+      { id: 'all', label: 'Overview', pct: Math.round(totalStats.hoursPct) },
+      ...sections.map((s) => {
+        const stats = calculateTreeStats([s]);
+        const shortName = s.name
+          .replace(/\(Quote.*?\)/i, '')
+          .replace(/\(Motor.*?\)/i, '')
+          .trim();
+        return {
+          id: s.id,
+          label: shortName.length > 20 ? shortName.substring(0, 18) + '...' : shortName,
+          pct: Math.round(stats.hoursPct),
+        };
+      }),
+    ];
+  }, [sections, totalStats]);
+
+  // Filter tasks based on active tab
+  const displayedNodes = useMemo(() => {
+    if (activeTab === 'all') return sections;
+    const match = sections.find((s) => s.id === activeTab);
+    return match ? (match.children && match.children.length > 0 ? match.children : [match]) : sections;
+  }, [activeTab, sections]);
+
+  const stats = useMemo(() => calculateTreeStats(displayedNodes), [displayedNodes]);
 
   const updatePending = (
     newPending: Record<string, { doneByName: string; tickedAt: string }>
@@ -324,25 +210,13 @@ export default function TrackerApp() {
 
   const handleUnlock = async (task: TaskNode) => {
     if (role !== 'owner') return;
-
     try {
       await supabase.rpc('save_tree_progress', {
         changes: [{ kind: 'unlock', task_id: task.id }],
       });
       loadSupabaseData();
     } catch (e) {
-      const unlockTree = (nodes: TaskNode[]): TaskNode[] => {
-        return nodes.map((n) => {
-          if (n.id === task.id) {
-            return { ...n, isLocked: false };
-          }
-          if (n.children) {
-            return { ...n, children: unlockTree(n.children) };
-          }
-          return n;
-        });
-      };
-      setTasks(unlockTree(tasks));
+      console.error('Unlock error:', e);
     }
   };
 
@@ -366,50 +240,11 @@ export default function TrackerApp() {
       updatePending({});
       await loadSupabaseData();
     } catch (err) {
-      console.warn('RPC save failed, falling back to local state:', err);
-      const lockTree = (nodes: TaskNode[]): TaskNode[] => {
-        return nodes.map((n) => {
-          if (pendingTicks[n.id]) {
-            return {
-              ...n,
-              isLocked: true,
-              doneByName: pendingTicks[n.id].doneByName,
-              tickedAt: pendingTicks[n.id].tickedAt,
-            };
-          }
-          if (n.children) {
-            return { ...n, children: lockTree(n.children) };
-          }
-          return n;
-        });
-      };
-      setTasks(lockTree(tasks));
-      updatePending({});
+      console.warn('RPC save failed:', err);
     } finally {
       setIsSaving(false);
     }
   };
-
-  const displayedTasks =
-    activeTab === 'all'
-      ? tasks
-      : tasks.filter((t) => t.id === activeTab || t.subprojectName === activeTab);
-
-  const stats = calculateTreeStats(displayedTasks);
-  const totalStats = calculateTreeStats(tasks);
-
-  // Dynamic navigation tabs based on current subprojects
-  const tabs = [
-    { id: 'all', label: 'Overview', pct: Math.round(totalStats.hoursPct) },
-    ...tasks.map((t) => {
-      const subStats = calculateTreeStats([t]);
-      return {
-        id: t.id,
-        label: t.subprojectName || t.name,
-        pct: Math.round(subStats.hoursPct),
-      };
-    }),
-  ];
 
   const pendingCount = Object.keys(pendingTicks).length;
   const hasMissingNames = Object.values(pendingTicks).some(
@@ -419,7 +254,7 @@ export default function TrackerApp() {
   return (
     <div className="min-h-screen pb-12">
       <Header
-        title="Protemp Project Tracker"
+        title="AVI Line 4 Site Progress"
         subtitle="MS Project Master & Linked Subprojects"
         role={role}
         isOffline={isOffline}
@@ -443,7 +278,7 @@ export default function TrackerApp() {
         <div className="mt-4">
           <div className="flex items-center justify-between mb-3 px-1">
             <h2 className="text-sm font-semibold text-fg-light dark:text-fg-dark">
-              {activeTab === 'all' ? 'All Subprojects & Tasks' : 'Subproject Tasks'}
+              {activeTab === 'all' ? 'All Sections & Items' : 'Section Items & Stages'}
             </h2>
             <div className="text-xs text-muted-light dark:text-muted-dark">
               Role: <span className="font-semibold uppercase text-accent-light dark:text-accent-dark">{role}</span>
@@ -451,7 +286,7 @@ export default function TrackerApp() {
           </div>
 
           <TaskTree
-            nodes={displayedTasks}
+            nodes={displayedNodes}
             role={role}
             pendingTicks={pendingTicks}
             onToggleTick={handleToggleTick}

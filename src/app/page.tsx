@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/Header';
 import { SummaryTiles } from '@/components/SummaryTiles';
 import { TaskTree } from '@/components/TaskTree';
@@ -9,8 +9,7 @@ import { TaskNode, UserRole } from '@/lib/types';
 import { calculateTreeStats, buildTaskTree } from '@/lib/calc';
 import { supabase } from '@/lib/supabase';
 
-// Sample tree data loaded initially
-const INITIAL_DEMO_TASKS: TaskNode[] = [
+const DEMO_FALLBACK_TASKS: TaskNode[] = [
   {
     id: 'sub-1',
     projectId: 'master',
@@ -121,67 +120,6 @@ const INITIAL_DEMO_TASKS: TaskNode[] = [
           },
         ],
       },
-      {
-        id: 'sub-1-2',
-        projectId: 'master',
-        projectName: 'Master Project',
-        subprojectName: 'AVI 7080 Move panels',
-        wbs: '1.2',
-        outlineLevel: 2,
-        name: 'E0105_1 Extruder Oil Pump (4 kW · 54m)',
-        isSummary: true,
-        quotedHours: 14.5,
-        children: [
-          {
-            id: 'task-201',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.2.1',
-            outlineLevel: 3,
-            name: 'Cable run MCC to isolator',
-            isSummary: false,
-            quotedHours: 5.5,
-            isLocked: false,
-          },
-          {
-            id: 'task-202',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.2.2',
-            outlineLevel: 3,
-            name: 'Cable glanded (both ends)',
-            isSummary: false,
-            quotedHours: 3.0,
-            isLocked: false,
-          },
-          {
-            id: 'task-203',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.2.3',
-            outlineLevel: 3,
-            name: 'Terminated at MCC & Isolator',
-            isSummary: false,
-            quotedHours: 4.0,
-            isLocked: false,
-          },
-          {
-            id: 'task-204',
-            projectId: 'master',
-            projectName: 'Master Project',
-            subprojectName: 'AVI 7080 Move panels',
-            wbs: '1.2.4',
-            outlineLevel: 3,
-            name: 'Tested & Labelled',
-            isSummary: false,
-            quotedHours: 2.0,
-            isLocked: false,
-          },
-        ],
-      },
     ],
   },
   {
@@ -238,7 +176,7 @@ const INITIAL_DEMO_TASKS: TaskNode[] = [
 
 export default function TrackerApp() {
   const [role, setRole] = useState<UserRole>('owner');
-  const [tasks, setTasks] = useState<TaskNode[]>(INITIAL_DEMO_TASKS);
+  const [tasks, setTasks] = useState<TaskNode[]>(DEMO_FALLBACK_TASKS);
   const [activeTab, setActiveTab] = useState('all');
   const [pendingTicks, setPendingTicks] = useState<
     Record<string, { doneByName: string; tickedAt: string }>
@@ -246,8 +184,63 @@ export default function TrackerApp() {
   const [isSaving, setIsSaving] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
 
-  // Restore pending ticks from localStorage on load
+  // Fetch live tasks & progress from Supabase
+  const loadSupabaseData = useCallback(async () => {
+    try {
+      const { data: dbTasks, error: taskErr } = await supabase
+        .from('tracker_tasks')
+        .select('*')
+        .order('sort_order', { ascending: true });
+
+      if (taskErr || !dbTasks || dbTasks.length === 0) {
+        return; // Retain fallback demo data
+      }
+
+      const { data: dbProgress } = await supabase
+        .from('tracker_task_progress')
+        .select('*');
+
+      const progressMap = new Map();
+      if (dbProgress) {
+        for (const p of dbProgress) {
+          progressMap.set(p.task_id, p);
+        }
+      }
+
+      const flatNodes: TaskNode[] = dbTasks.map((t) => {
+        const prog = progressMap.get(t.id);
+        return {
+          id: t.id,
+          projectId: t.project_id,
+          projectName: 'Master Project',
+          subprojectName: t.project_id,
+          wbs: t.wbs,
+          outlineLevel: t.outline_level,
+          name: t.name,
+          isSummary: t.is_summary,
+          quotedHours: Number(t.quoted_hours) || 0,
+          durationDays: Number(t.duration_days) || 0,
+          notes: t.notes,
+          isLocked: !!prog,
+          doneByName: prog ? prog.done_by_name : '',
+          tickedAt: prog ? prog.ticked_at : undefined,
+          savedAt: prog ? prog.saved_at : undefined,
+        };
+      });
+
+      const nestedTree = buildTaskTree(flatNodes);
+      if (nestedTree.length > 0) {
+        setTasks(nestedTree);
+      }
+    } catch (e) {
+      console.warn('Could not load Supabase data, running with local store', e);
+    }
+  }, []);
+
   useEffect(() => {
+    loadSupabaseData();
+
+    // Restore pending ticks from localStorage
     try {
       const stored = localStorage.getItem('protemp_pending_ticks');
       if (stored) {
@@ -257,17 +250,30 @@ export default function TrackerApp() {
       console.error('Failed to load pending ticks from localStorage', e);
     }
 
+    // Subscribe to Supabase Realtime changes
+    const channel = supabase
+      .channel('realtime_tracker_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tracker_task_progress' },
+        () => {
+          loadSupabaseData();
+        }
+      )
+      .subscribe();
+
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
     return () => {
+      supabase.removeChannel(channel);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [loadSupabaseData]);
 
-  // Sync pending changes to localStorage
   const updatePending = (
     newPending: Record<string, { doneByName: string; tickedAt: string }>
   ) => {
@@ -308,21 +314,29 @@ export default function TrackerApp() {
     }
   };
 
-  const handleUnlock = (task: TaskNode) => {
+  const handleUnlock = async (task: TaskNode) => {
     if (role !== 'owner') return;
-    // Mark unlocked locally and let owner save
-    const unlockTree = (nodes: TaskNode[]): TaskNode[] => {
-      return nodes.map((n) => {
-        if (n.id === task.id) {
-          return { ...n, isLocked: false };
-        }
-        if (n.children) {
-          return { ...n, children: unlockTree(n.children) };
-        }
-        return n;
+
+    try {
+      await supabase.rpc('save_tree_progress', {
+        changes: [{ kind: 'unlock', task_id: task.id }],
       });
-    };
-    setTasks(unlockTree(tasks));
+      loadSupabaseData();
+    } catch (e) {
+      // Local fallback
+      const unlockTree = (nodes: TaskNode[]): TaskNode[] => {
+        return nodes.map((n) => {
+          if (n.id === task.id) {
+            return { ...n, isLocked: false };
+          }
+          if (n.children) {
+            return { ...n, children: unlockTree(n.children) };
+          }
+          return n;
+        });
+      };
+      setTasks(unlockTree(tasks));
+    }
   };
 
   const handleDiscard = () => {
@@ -331,8 +345,21 @@ export default function TrackerApp() {
 
   const handleSave = async () => {
     setIsSaving(true);
-    // Lock all pending tasks
-    setTimeout(() => {
+
+    const changes = Object.entries(pendingTicks).map(([taskId, val]) => ({
+      kind: 'tick',
+      task_id: taskId,
+      project_id: 'master',
+      done_by_name: val.doneByName,
+      ticked_at: val.tickedAt,
+    }));
+
+    try {
+      await supabase.rpc('save_tree_progress', { changes });
+      updatePending({});
+      await loadSupabaseData();
+    } catch (err) {
+      console.warn('RPC save failed, falling back to local state:', err);
       const lockTree = (nodes: TaskNode[]): TaskNode[] => {
         return nodes.map((n) => {
           if (pendingTicks[n.id]) {
@@ -351,8 +378,9 @@ export default function TrackerApp() {
       };
       setTasks(lockTree(tasks));
       updatePending({});
+    } finally {
       setIsSaving(false);
-    }, 600);
+    }
   };
 
   // Filter tasks based on active tab
@@ -364,7 +392,6 @@ export default function TrackerApp() {
   const stats = calculateTreeStats(displayedTasks);
   const totalStats = calculateTreeStats(tasks);
 
-  // Tabs generated from top-level tasks / subprojects
   const tabs = [
     { id: 'all', label: 'Overview', pct: Math.round(totalStats.hoursPct) },
     ...tasks.map((t) => {

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, ShieldCheck, WifiOff } from 'lucide-react';
+import { CheckCircle2, RefreshCw, WifiOff } from 'lucide-react';
 
 interface HeaderProps {
   title: string;
@@ -11,6 +11,7 @@ interface HeaderProps {
   activeTab: string;
   tabs: { id: string; label: string; pct: number }[];
   onSelectTab: (id: string) => void;
+  onOpenSync: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab,
   tabs,
   onSelectTab,
+  onOpenSync,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-surface-light dark:bg-surface-dark border-b border-line-light dark:border-line-dark shadow-sm">
@@ -35,7 +37,17 @@ export const Header: React.FC<HeaderProps> = ({
             </p>
           </div>
 
-          <div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenSync}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-accent-light/10 text-accent-light dark:bg-accent-dark/20 dark:text-accent-dark hover:bg-accent-light/20 transition-colors border border-accent-light/20 dark:border-accent-dark/30"
+              title="Two-Way MS Project Sync"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sync MS Project</span>
+              <span className="sm:hidden">Sync</span>
+            </button>
+
             {isOffline ? (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
                 <WifiOff className="w-3.5 h-3.5" />
@@ -48,13 +60,13 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                Live Tracker
+                Live
               </span>
             )}
           </div>
         </div>
 
-        {/* Scrollable Tabs */}
+        {/* Scrollable Dynamic Subproject Tabs */}
         <div className="flex space-x-2 mt-3 overflow-x-auto no-scrollbar pb-1">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;

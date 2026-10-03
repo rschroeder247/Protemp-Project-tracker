@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { SummaryTiles } from '@/components/SummaryTiles';
 import { TaskTree } from '@/components/TaskTree';
 import { SaveBar } from '@/components/SaveBar';
+import { SyncModal } from '@/components/SyncModal';
 import { TaskNode, UserRole } from '@/lib/types';
 import { calculateTreeStats, buildTaskTree } from '@/lib/calc';
 import { supabase } from '@/lib/supabase';
@@ -183,6 +184,7 @@ export default function TrackerApp() {
   >({});
   const [isSaving, setIsSaving] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
   // Fetch live tasks & progress from Supabase
   const loadSupabaseData = useCallback(async () => {
@@ -193,7 +195,7 @@ export default function TrackerApp() {
         .order('sort_order', { ascending: true });
 
       if (taskErr || !dbTasks || dbTasks.length === 0) {
-        return; // Retain fallback demo data
+        return;
       }
 
       const { data: dbProgress } = await supabase
@@ -240,7 +242,6 @@ export default function TrackerApp() {
   useEffect(() => {
     loadSupabaseData();
 
-    // Restore pending ticks from localStorage
     try {
       const stored = localStorage.getItem('protemp_pending_ticks');
       if (stored) {
@@ -250,12 +251,19 @@ export default function TrackerApp() {
       console.error('Failed to load pending ticks from localStorage', e);
     }
 
-    // Subscribe to Supabase Realtime changes
+    // Subscribe to Realtime updates for both progress and task definitions
     const channel = supabase
       .channel('realtime_tracker_changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tracker_task_progress' },
+        () => {
+          loadSupabaseData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tracker_tasks' },
         () => {
           loadSupabaseData();
         }
@@ -323,7 +331,6 @@ export default function TrackerApp() {
       });
       loadSupabaseData();
     } catch (e) {
-      // Local fallback
       const unlockTree = (nodes: TaskNode[]): TaskNode[] => {
         return nodes.map((n) => {
           if (n.id === task.id) {
@@ -383,7 +390,6 @@ export default function TrackerApp() {
     }
   };
 
-  // Filter tasks based on active tab
   const displayedTasks =
     activeTab === 'all'
       ? tasks
@@ -392,6 +398,7 @@ export default function TrackerApp() {
   const stats = calculateTreeStats(displayedTasks);
   const totalStats = calculateTreeStats(tasks);
 
+  // Dynamic navigation tabs based on current subprojects
   const tabs = [
     { id: 'all', label: 'Overview', pct: Math.round(totalStats.hoursPct) },
     ...tasks.map((t) => {
@@ -419,6 +426,7 @@ export default function TrackerApp() {
         activeTab={activeTab}
         tabs={tabs}
         onSelectTab={setActiveTab}
+        onOpenSync={() => setIsSyncModalOpen(true)}
       />
 
       <main className="max-w-3xl mx-auto px-4 mt-2">
@@ -459,6 +467,15 @@ export default function TrackerApp() {
         isSaving={isSaving}
         onDiscard={handleDiscard}
         onSave={handleSave}
+      />
+
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        onSyncComplete={() => {
+          loadSupabaseData();
+          setIsSyncModalOpen(false);
+        }}
       />
     </div>
   );

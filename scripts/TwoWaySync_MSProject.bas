@@ -14,11 +14,16 @@ Option Explicit
 
 Private Const API_BASE_URL As String = "https://protemp-project-tracker.vercel.app"
 Private Const RELATIVE_MASTER_PATH As String = "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
+Private Const RELATIVE_XML_PATH As String = "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
 
 Public IsExportingXml As Boolean
 
 Private Function GetMasterProjectPath() As String
     GetMasterProjectPath = Environ$("USERPROFILE") & RELATIVE_MASTER_PATH
+End Function
+
+Private Function GetMasterXmlPath() As String
+    GetMasterXmlPath = Environ$("USERPROFILE") & RELATIVE_XML_PATH
 End Function
 
 ' -------------------------------------------------------------------------
@@ -29,27 +34,12 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     If IsExportingXml Then Exit Sub
     IsExportingXml = True
     
-    Dim targetPj As Object
-    If pj Is Nothing Then
-        On Error Resume Next
-        Set targetPj = ActiveProject
-        On Error GoTo EH
-    Else
-        Set targetPj = pj
-    End If
+    If Application.Projects.Count = 0 Then GoTo CleanUp
     
-    If targetPj Is Nothing Then GoTo CleanUp
-    
-    Dim originalPath As String
-    originalPath = targetPj.FullName
-    
-    ' Calculate the XML file path matching the project file
+    Dim mppPath As String
     Dim xmlPath As String
-    If Len(originalPath) > 0 And InStr(originalPath, ".") > 0 Then
-        xmlPath = Left(originalPath, InStrRev(originalPath, ".")) & "xml"
-    Else
-        xmlPath = Environ$("USERPROFILE") & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
-    End If
+    mppPath = GetMasterProjectPath()
+    xmlPath = GetMasterXmlPath()
     
     ' Suppress overwrite dialog so saving is completely seamless
     Application.DisplayAlerts = False
@@ -58,8 +48,11 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     Application.FileSaveAs Name:=xmlPath, FormatID:="MSProject.XML"
     
     ' If FileSaveAs switched the active project to XML, re-open the MPP
-    If LCase$(Right$(ActiveProject.FullName, 4)) = ".xml" And Len(originalPath) > 0 And LCase$(Right$(originalPath, 4)) = ".mpp" Then
-        Application.FileOpenEx Name:=originalPath
+    If LCase$(Right$(Application.ActiveProject.Name, 4)) = ".xml" Then
+        Application.FileCloseEx Save:=pjDoNotSave
+        If Dir(mppPath) <> "" Then
+            Application.FileOpenEx Name:=mppPath
+        End If
     End If
     
     ' Update status bar
@@ -91,43 +84,42 @@ End Sub
 ' -------------------------------------------------------------------------
 Public Sub SaveMasterAndExportXml()
     On Error GoTo EH
-    Dim pj As Project
-    Set pj = ActiveProject
     
-    If pj Is Nothing Then
-        MsgBox "No project is currently open.", vbExclamation
+    If Application.Projects.Count = 0 Then
+        MsgBox "No project is currently open in Microsoft Project.", vbExclamation
         Exit Sub
     End If
     
-    Dim originalPath As String
-    originalPath = pj.FullName
+    ' 1. Save standard MPP first using MS Project Application method
+    Application.FileSave
     
-    ' 1. Save standard MPP first
-    pj.Save
-    
-    ' 2. Export XML copy
+    ' 2. Determine paths
+    Dim mppPath As String
     Dim xmlPath As String
-    If Len(originalPath) > 0 And InStr(originalPath, ".") > 0 Then
-        xmlPath = Left(originalPath, InStrRev(originalPath, ".")) & "xml"
-    Else
-        xmlPath = Environ$("USERPROFILE") & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
-    End If
+    mppPath = GetMasterProjectPath()
+    xmlPath = GetMasterXmlPath()
     
+    ' 3. Export XML copy
     Application.DisplayAlerts = False
     Application.FileSaveAs Name:=xmlPath, FormatID:="MSProject.XML"
     
-    ' Ensure user remains in MPP
-    If LCase$(Right$(ActiveProject.FullName, 4)) = ".xml" And Len(originalPath) > 0 And LCase$(Right$(originalPath, 4)) = ".mpp" Then
-        Application.FileOpenEx Name:=originalPath
+    ' 4. Ensure user remains in MPP
+    If LCase$(Right$(Application.ActiveProject.Name, 4)) = ".xml" Then
+        Application.FileCloseEx Save:=pjDoNotSave
+        If Dir(mppPath) <> "" Then
+            Application.FileOpenEx Name:=mppPath
+        End If
     End If
     Application.DisplayAlerts = True
     
+    On Error Resume Next
     Application.StatusBar = "Protemp Tracker: Saved MPP & exported XML to " & xmlPath
-    MsgBox "Saved MPP and successfully exported Master Project.xml!" & vbCrLf & _
+    MsgBox "Saved MPP and successfully exported Master Project.xml!" & vbCrLf & vbCrLf & _
            "File: " & xmlPath, vbInformation, "Protemp Tracker Sync"
     Exit Sub
 
 EH:
+    On Error Resume Next
     Application.DisplayAlerts = True
     MsgBox "Error saving and exporting XML: " & Err.Description, vbCritical
 End Sub

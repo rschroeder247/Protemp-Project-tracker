@@ -18,16 +18,8 @@ Private Const RELATIVE_XML_PATH As String = "\OneDrive - Protemp\Protemp Operati
 
 Public IsExportingXml As Boolean
 
-Private Function GetMasterProjectPath() As String
-    GetMasterProjectPath = Environ$("USERPROFILE") & RELATIVE_MASTER_PATH
-End Function
-
-Private Function GetMasterXmlPath() As String
-    GetMasterXmlPath = Environ$("USERPROFILE") & RELATIVE_XML_PATH
-End Function
-
 ' -------------------------------------------------------------------------
-' DIRECTION 0: Auto-Save XML when Project is Saved (Ctrl + S)
+' DIRECTION 0: Auto-Save XML when Project is Saved
 ' -------------------------------------------------------------------------
 Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optional ByVal isSilent As Boolean = True)
     On Error GoTo EH
@@ -36,10 +28,14 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     
     If Application.Projects.Count = 0 Then GoTo CleanUp
     
+    Dim userProfile As String
+    userProfile = Environ$("USERPROFILE")
+    
     Dim mppPath As String
+    mppPath = userProfile & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
+    
     Dim xmlPath As String
-    mppPath = GetMasterProjectPath()
-    xmlPath = GetMasterXmlPath()
+    xmlPath = userProfile & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
     
     ' Suppress overwrite dialog so saving is completely seamless
     Application.DisplayAlerts = False
@@ -80,7 +76,7 @@ EH:
 End Sub
 
 ' -------------------------------------------------------------------------
-' 1-CLICK SAVE & EXPORT (Recommended: assign to Quick Access Toolbar or Ribbon)
+' 1-CLICK SAVE & EXPORT (Self-Contained: assign to Quick Access Toolbar or Ribbon)
 ' -------------------------------------------------------------------------
 Public Sub SaveMasterAndExportXml()
     On Error GoTo EH
@@ -90,14 +86,18 @@ Public Sub SaveMasterAndExportXml()
         Exit Sub
     End If
     
-    ' 1. Save standard MPP first using MS Project Application method
+    ' 1. Save standard MPP first
     Application.FileSave
     
-    ' 2. Determine paths
+    ' 2. Determine paths directly (no helper functions required)
+    Dim userProfile As String
+    userProfile = Environ$("USERPROFILE")
+    
     Dim mppPath As String
+    mppPath = userProfile & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
+    
     Dim xmlPath As String
-    mppPath = GetMasterProjectPath()
-    xmlPath = GetMasterXmlPath()
+    xmlPath = userProfile & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
     
     ' 3. Export XML copy
     Application.DisplayAlerts = False

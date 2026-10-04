@@ -23,14 +23,9 @@ Option Explicit
 
 Private Sub Project_Open(ByVal pj As Project)
     On Error Resume Next
-    ' Automatically pull latest site progress from the cloud
+    ' Automatically pull latest site progress from the cloud when opened
     PullSiteProgressIntoMSProject isSilent:=True
 End Sub
 
-Private Sub Project_BeforeSave(ByVal pj As Project)
-    On Error Resume Next
-    ' Automatically save the XML file whenever you save
-    AutoExportProjectToXml pj:=pj, isSilent:=True
-End Sub
 
 

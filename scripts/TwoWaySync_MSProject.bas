@@ -13,7 +13,11 @@ Option Explicit
 ' =========================================================================
 
 Private Const API_BASE_URL As String = "https://protemp-project-tracker.vercel.app"
-Private Const MASTER_PATH As String = "C:\Users\RolandSchroeder\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
+Private Const RELATIVE_MASTER_PATH As String = "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
+
+Private Function GetMasterProjectPath() As String
+    GetMasterProjectPath = Environ$("USERPROFILE") & RELATIVE_MASTER_PATH
+End Function
 
 ' -------------------------------------------------------------------------
 ' DIRECTION 1: Push MS Project tasks -> Web Tracker
@@ -35,7 +39,15 @@ Public Sub PushMasterProjectToWebTracker()
     End If
     
     If pj.Projects.Count = 0 Then
-        pj.FileOpenEx MASTER_PATH, ReadOnly:=True
+        Dim masterPath As String
+        masterPath = GetMasterProjectPath()
+        If Dir(masterPath) <> "" Then
+            pj.FileOpenEx masterPath, ReadOnly:=True
+        Else
+            MsgBox "Please open your MS Project file before running this sync." & vbCrLf & _
+                   "Could not find default file at: " & masterPath, vbExclamation
+            Exit Sub
+        End If
     End If
     
     Dim tasksCollection As Object
@@ -145,7 +157,15 @@ Public Sub PullSiteProgressIntoMSProject()
     End If
     
     If pj.Projects.Count = 0 Then
-        pj.FileOpenEx MASTER_PATH
+        Dim masterPathPull As String
+        masterPathPull = GetMasterProjectPath()
+        If Dir(masterPathPull) <> "" Then
+            pj.FileOpenEx masterPathPull
+        Else
+            MsgBox "Please open your MS Project file before running this sync." & vbCrLf & _
+                   "Could not find default file at: " & masterPathPull, vbExclamation
+            Exit Sub
+        End If
     End If
     
     ' 3. Parse tasks and update % Complete in MS Project

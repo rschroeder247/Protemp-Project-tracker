@@ -170,3 +170,60 @@ export function filterTreeByQuery(
   return { filteredNodes, matchCount, autoExpandIds };
 }
 
+/**
+ * Recursively filters a task tree to hide completed tasks.
+ * If hideCompleted is true:
+ * - Leaf tasks that are completed (isLocked === true or pending in pendingTicks) are excluded.
+ * - Summary tasks with no remaining pending children are also excluded.
+ */
+export function filterTreeByCompletion(
+  nodes: TaskNode[],
+  hideCompleted: boolean,
+  pendingTicks?: Record<string, any>
+): TaskNode[] {
+  if (!hideCompleted) return nodes;
+
+  function filterNode(node: TaskNode): TaskNode | null {
+    const isDone = node.isLocked || (pendingTicks && !!pendingTicks[node.id]);
+
+    if (!node.isSummary) {
+      if (isDone) {
+        return null;
+      }
+      return { ...node };
+    }
+
+    if (!node.children || node.children.length === 0) {
+      return null;
+    }
+
+    const remainingChildren: TaskNode[] = [];
+    for (const child of node.children) {
+      const filtered = filterNode(child);
+      if (filtered) {
+        remainingChildren.push(filtered);
+      }
+    }
+
+    if (remainingChildren.length === 0) {
+      return null;
+    }
+
+    return {
+      ...node,
+      children: remainingChildren,
+    };
+  }
+
+  const result: TaskNode[] = [];
+  for (const node of nodes) {
+    const filtered = filterNode(node);
+    if (filtered) {
+      result.push(filtered);
+    }
+  }
+
+  return result;
+}
+
+

@@ -12,9 +12,21 @@ import {
   buildTaskTree,
   getAllSummaryIds,
   filterTreeByQuery,
+  filterTreeByCompletion,
 } from '@/lib/calc';
 import { supabase } from '@/lib/supabase';
-import { Search, X, ChevronsDownUp, ChevronsUpDown, Layers, RefreshCw, CheckCircle2 } from 'lucide-react';
+import {
+  Search,
+  X,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Layers,
+  RefreshCw,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
+
 
 
 interface TrackerClientProps {
@@ -47,12 +59,32 @@ export function TrackerClient({
   const [isAutoSyncing, setIsAutoSyncing] = useState(false);
   const [autoSyncMessage, setAutoSyncMessage] = useState<string | null>(null);
 
+  // Show / Hide Completed tasks state
+  const [hideCompleted, setHideCompleted] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('protemp_hide_completed');
+        return stored === 'true';
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('protemp_hide_completed', String(hideCompleted));
+    } catch {}
+  }, [hideCompleted]);
+
   // Search & Expand/Minimize state
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [hasInitializedExpanded, setHasInitializedExpanded] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
 
   // Reload data from Supabase
   const refreshData = useCallback(async () => {
@@ -307,10 +339,23 @@ export function TrackerClient({
     }
   }, [displayedNodes, hasInitializedExpanded]);
 
-  // Search filtering
+  // Completed tasks filtering
+  const completionFilteredNodes = useMemo(() => {
+    return filterTreeByCompletion(displayedNodes, hideCompleted, pendingTicks);
+  }, [displayedNodes, hideCompleted, pendingTicks]);
+
+  // Count how many completed leaf tasks are hidden in the current view
+  const hiddenCompletedCount = useMemo(() => {
+    if (!hideCompleted) return 0;
+    const allStats = calculateTreeStats(displayedNodes);
+    const visStats = calculateTreeStats(completionFilteredNodes);
+    return Math.max(0, allStats.completedLeafTasks - visStats.completedLeafTasks);
+  }, [displayedNodes, completionFilteredNodes, hideCompleted]);
+
+  // Search filtering applied on completion-filtered nodes
   const { filteredNodes, matchCount, autoExpandIds } = useMemo(() => {
-    return filterTreeByQuery(displayedNodes, searchQuery);
-  }, [displayedNodes, searchQuery]);
+    return filterTreeByQuery(completionFilteredNodes, searchQuery);
+  }, [completionFilteredNodes, searchQuery]);
 
   // Global search count across all tasks
   const globalMatchCount = useMemo(() => {
@@ -320,6 +365,11 @@ export function TrackerClient({
     return filterTreeByQuery(allTasks, searchQuery).matchCount;
   }, [allTasks, searchQuery, selectedSubprojectId, selectedHeadingId]);
 
+  // Visible summary IDs for expand/minimize
+  const visibleSummaryIds = useMemo(() => {
+    return getAllSummaryIds(completionFilteredNodes);
+  }, [completionFilteredNodes]);
+
   // Combined expanded IDs
   const activeExpandedIds = useMemo(() => {
     if (!searchQuery.trim()) return expandedIds;
@@ -327,16 +377,16 @@ export function TrackerClient({
   }, [expandedIds, autoExpandIds, searchQuery]);
 
   const isAllMinimized = useMemo(() => {
-    if (currentSummaryIds.size === 0) return false;
-    for (const id of currentSummaryIds) {
+    if (visibleSummaryIds.size === 0) return false;
+    for (const id of visibleSummaryIds) {
       if (expandedIds.has(id)) return false;
     }
     return true;
-  }, [currentSummaryIds, expandedIds]);
+  }, [visibleSummaryIds, expandedIds]);
 
   const handleToggleMinimizeAll = () => {
     if (isAllMinimized) {
-      setExpandedIds(new Set(currentSummaryIds));
+      setExpandedIds(new Set(visibleSummaryIds));
     } else {
       setExpandedIds(new Set());
     }
@@ -553,6 +603,41 @@ export function TrackerClient({
                 )}
               </div>
 
+              {/* Show / Hide Completed Button */}
+              <button
+                type="button"
+                onClick={() => setHideCompleted((prev) => !prev)}
+                className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5 shadow-xs ${
+                  hideCompleted
+                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border-line-light dark:border-line-dark'
+                }`}
+                title={
+                  hideCompleted
+                    ? `Completed tasks hidden (${hiddenCompletedCount} hidden). Click to show completed tasks.`
+                    : 'Click to hide completed tasks and show only pending work'
+                }
+              >
+                {hideCompleted ? (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                    <span className="hidden sm:inline">Completed Hidden</span>
+                    <span className="sm:hidden">Hidden</span>
+                    {hiddenCompletedCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300">
+                        {hiddenCompletedCount}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-3.5 h-3.5 text-muted-light dark:text-muted-dark" />
+                    <span className="hidden sm:inline">Hide Completed</span>
+                    <span className="sm:hidden">Hide Done</span>
+                  </>
+                )}
+              </button>
+
               {/* Minimize All / Expand All Button */}
               <button
                 type="button"
@@ -621,7 +706,7 @@ export function TrackerClient({
                     {tier2Headings.find((h) => h.id === selectedHeadingId)?.label}
                   </span>
                   <span className="text-[11px] text-muted-light dark:text-muted-dark">
-                    ({displayedNodes.length} {displayedNodes.length === 1 ? 'item' : 'items'})
+                    ({hideCompleted ? `${completionFilteredNodes.length} pending` : `${displayedNodes.length} ${displayedNodes.length === 1 ? 'item' : 'items'}`})
                   </span>
                 </>
               )}
@@ -644,17 +729,39 @@ export function TrackerClient({
           </div>
 
           {/* Tier 3: Task Tree (Last Headings & Actionable Stages) */}
-          <TaskTree
-            nodes={filteredNodes}
-            role={role}
-            pendingTicks={pendingTicks}
-            onToggleTick={handleToggleTick}
-            onChangeDoneBy={handleChangeDoneBy}
-            onUnlock={handleUnlock}
-            expandedIds={activeExpandedIds}
-            onToggleExpand={handleToggleExpandNode}
-            searchQuery={searchQuery}
-          />
+          {hideCompleted && displayedNodes.length > 0 && completionFilteredNodes.length === 0 && !searchQuery.trim() ? (
+            <div className="bg-surface-light dark:bg-surface-dark border border-emerald-500/30 rounded-xl p-8 text-center shadow-xs my-4 space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-fg-light dark:text-fg-dark">
+                All tasks in this section are completed!
+              </h3>
+              <p className="text-xs text-muted-light dark:text-muted-dark max-w-md mx-auto">
+                All {stats.totalLeafTasks} tasks in &ldquo;{selectedHeadingId !== 'all' ? tier2Headings.find((h) => h.id === selectedHeadingId)?.label : activeSubprojectNode ? activeSubprojectNode.name : 'this view'}&rdquo; have been ticked off and locked.
+              </p>
+              <button
+                type="button"
+                onClick={() => setHideCompleted(false)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors cursor-pointer"
+              >
+                <Eye className="w-4 h-4" />
+                Show Completed Tasks ({stats.completedLeafTasks})
+              </button>
+            </div>
+          ) : (
+            <TaskTree
+              nodes={filteredNodes}
+              role={role}
+              pendingTicks={pendingTicks}
+              onToggleTick={handleToggleTick}
+              onChangeDoneBy={handleChangeDoneBy}
+              onUnlock={handleUnlock}
+              expandedIds={activeExpandedIds}
+              onToggleExpand={handleToggleExpandNode}
+              searchQuery={searchQuery}
+            />
+          )}
         </div>
       </main>
 

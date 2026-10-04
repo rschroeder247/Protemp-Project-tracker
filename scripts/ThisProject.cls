@@ -27,9 +27,10 @@ Private Sub Project_Open(ByVal pj As Project)
     PullSiteProgressIntoMSProject isSilent:=True
 End Sub
 
-Private Sub Project_BeforeSave(ByVal pj As Project, ByVal SaveAsUI As Boolean, Cancel As Boolean)
+Private Sub Project_BeforeSave(ByVal pj As Project)
     On Error Resume Next
-    ' Automatically save the XML file whenever you push Save (Ctrl + S or File -> Save)
+    ' Automatically save the XML file whenever you save
     AutoExportProjectToXml pj:=pj, isSilent:=True
 End Sub
+
 

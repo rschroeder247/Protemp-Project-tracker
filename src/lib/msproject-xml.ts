@@ -56,6 +56,7 @@ function extractTasksFromXmlProject(
     const subprojectName = t.Subproject || currentSubproject;
     const workStr = String(t.Work || '');
     const quotedHours = parseIsoDurationToHours(workStr);
+    const percentComplete = parseInt(t.PercentComplete || '0', 10);
 
     tasks.push({
       id: uid,
@@ -69,6 +70,7 @@ function extractTasksFromXmlProject(
       quotedHours,
       durationDays: t.Duration ? parseIsoDurationToHours(String(t.Duration)) / 8 : 0,
       notes: t.Notes ? String(t.Notes) : '',
+      percentComplete,
     });
   }
 

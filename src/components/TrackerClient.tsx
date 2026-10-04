@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Header } from '@/components/Header';
+import { Header, NavItem } from '@/components/Header';
 import { SummaryTiles } from '@/components/SummaryTiles';
 import { TaskTree } from '@/components/TaskTree';
 import { SaveBar } from '@/components/SaveBar';
@@ -14,7 +14,7 @@ import {
   filterTreeByQuery,
 } from '@/lib/calc';
 import { supabase } from '@/lib/supabase';
-import { Search, X, ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
+import { Search, X, ChevronsDownUp, ChevronsUpDown, Layers } from 'lucide-react';
 
 interface TrackerClientProps {
   initialDbTasks: any[];
@@ -28,7 +28,13 @@ export function TrackerClient({
   const [role, setRole] = useState<UserRole>('owner');
   const [dbTasks, setDbTasks] = useState<any[]>(initialDbTasks);
   const [dbProgress, setDbProgress] = useState<any[]>(initialDbProgress);
-  const [activeTab, setActiveTab] = useState('all');
+
+  // 3-Tier Navigation State
+  // Tier 1: Subproject ID ('all' or specific subproject root id)
+  const [selectedSubprojectId, setSelectedSubprojectId] = useState<string>('all');
+  // Tier 2: First Heading ID ('all' or specific level-2 heading id)
+  const [selectedHeadingId, setSelectedHeadingId] = useState<string>('all');
+
   const [pendingTicks, setPendingTicks] = useState<
     Record<string, { doneByName: string; tickedAt: string }>
   >({});
@@ -136,57 +142,115 @@ export function TrackerClient({
     return buildTaskTree(flatNodes);
   }, [dbTasks, dbProgress]);
 
-  // Extract Major Subproject Sections (Outline Level 2 or Root Children)
-  const sections = useMemo(() => {
+  // Default to the first subproject if available and currently on 'all'
+  useEffect(() => {
+    if (allTasks.length === 1 && selectedSubprojectId === 'all') {
+      setSelectedSubprojectId(allTasks[0].id);
+    }
+  }, [allTasks, selectedSubprojectId]);
+
+  // TIER 1: Subproject Buttons
+  const tier1Subprojects: NavItem[] = useMemo(() => {
     if (allTasks.length === 0) return [];
-    if (allTasks.length === 1 && allTasks[0].children && allTasks[0].children.length > 0) {
-      return allTasks[0].children;
-    }
-    const found: TaskNode[] = [];
-    for (const r of allTasks) {
-      if (r.children && r.children.length > 0 && r.children.some((c) => c.isSummary)) {
-        found.push(...r.children);
-      } else {
-        found.push(r);
-      }
-    }
-    return found;
-  }, [allTasks]);
+    const totalStats = calculateTreeStats(allTasks);
 
-  const totalStats = useMemo(() => calculateTreeStats(sections), [sections]);
-
-  // Dynamic Navigation Tabs
-  const tabs = useMemo(() => {
-    return [
-      { id: 'all', label: 'Overview', pct: Math.round(totalStats.hoursPct) },
-      ...sections.map((s) => {
-        const stats = calculateTreeStats([s]);
-        const shortName = s.name
+    const items: NavItem[] = [
+      {
+        id: 'all',
+        label: 'Overview (All)',
+        pct: Math.round(totalStats.hoursPct),
+        count: allTasks.length,
+      },
+      ...allTasks.map((sp) => {
+        const stats = calculateTreeStats([sp]);
+        const shortName = sp.name
           .replace(/\(Quote.*?\)/i, '')
           .replace(/\(Motor.*?\)/i, '')
           .trim();
         return {
-          id: s.id,
-          label: shortName.length > 20 ? shortName.substring(0, 18) + '...' : shortName,
+          id: sp.id,
+          label: shortName.length > 25 ? shortName.substring(0, 23) + '...' : shortName,
           pct: Math.round(stats.hoursPct),
+          count: sp.children ? sp.children.length : 1,
         };
       }),
     ];
-  }, [sections, totalStats]);
 
-  // Filter tasks based on active tab
-  const displayedNodes = useMemo(() => {
-    if (activeTab === 'all') return sections;
-    const match = sections.find((s) => s.id === activeTab);
-    return match ? (match.children && match.children.length > 0 ? match.children : [match]) : sections;
-  }, [activeTab, sections]);
+    return items;
+  }, [allTasks]);
 
-  // Calculate all summary IDs for current displayed nodes
+  const activeSubprojectNode = useMemo(() => {
+    if (selectedSubprojectId === 'all') return null;
+    return allTasks.find((sp) => sp.id === selectedSubprojectId) || null;
+  }, [allTasks, selectedSubprojectId]);
+
+  // TIER 2: First Headings under Active Subproject
+  const tier2Headings: NavItem[] = useMemo(() => {
+    const headingsSource: TaskNode[] = activeSubprojectNode
+      ? activeSubprojectNode.children || []
+      : allTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+
+    if (headingsSource.length === 0) return [];
+
+    const currentScopeStats = calculateTreeStats(
+      activeSubprojectNode ? [activeSubprojectNode] : allTasks
+    );
+
+    const items: NavItem[] = [
+      {
+        id: 'all',
+        label: 'All Headings',
+        pct: Math.round(currentScopeStats.hoursPct),
+        count: headingsSource.length,
+      },
+      ...headingsSource.map((h) => {
+        const stats = calculateTreeStats([h]);
+        const cleanName = h.name
+          .replace(/\(Quote.*?\)/i, '')
+          .replace(/\(Motor.*?\)/i, '')
+          .trim();
+        return {
+          id: h.id,
+          label: cleanName.length > 28 ? cleanName.substring(0, 26) + '...' : cleanName,
+          pct: Math.round(stats.hoursPct),
+          count: h.children ? h.children.length : 0,
+        };
+      }),
+    ];
+
+    return items;
+  }, [allTasks, activeSubprojectNode]);
+
+  // TIER 3: The Last Headings / Actionable Items
+  const displayedNodes: TaskNode[] = useMemo(() => {
+    const headingsSource: TaskNode[] = activeSubprojectNode
+      ? activeSubprojectNode.children || []
+      : allTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+
+    if (selectedHeadingId === 'all') {
+      return headingsSource.length > 0
+        ? headingsSource
+        : (activeSubprojectNode ? [activeSubprojectNode] : allTasks);
+    }
+
+    const matchedHeading = headingsSource.find((h) => h.id === selectedHeadingId);
+    if (!matchedHeading) return headingsSource;
+
+    // Show the last headings / items under this heading
+    if (matchedHeading.children && matchedHeading.children.length > 0) {
+      return matchedHeading.children;
+    }
+
+    // Direct leaf task (milestones, single tasks)
+    return [matchedHeading];
+  }, [allTasks, activeSubprojectNode, selectedHeadingId]);
+
+  // Calculate summary IDs for current displayed nodes
   const currentSummaryIds = useMemo(() => {
     return getAllSummaryIds(displayedNodes);
   }, [displayedNodes]);
 
-  // Initial expansion of all summaries
+  // Initial expansion
   useEffect(() => {
     if (!hasInitializedExpanded && displayedNodes.length > 0) {
       setExpandedIds(getAllSummaryIds(displayedNodes));
@@ -199,19 +263,20 @@ export function TrackerClient({
     return filterTreeByQuery(displayedNodes, searchQuery);
   }, [displayedNodes, searchQuery]);
 
-  // Global search count across all sections (when on a sub-tab)
+  // Global search count across all tasks
   const globalMatchCount = useMemo(() => {
-    if (activeTab === 'all' || !searchQuery.trim()) return 0;
-    return filterTreeByQuery(sections, searchQuery).matchCount;
-  }, [sections, searchQuery, activeTab]);
+    if ((selectedSubprojectId === 'all' && selectedHeadingId === 'all') || !searchQuery.trim()) {
+      return 0;
+    }
+    return filterTreeByQuery(allTasks, searchQuery).matchCount;
+  }, [allTasks, searchQuery, selectedSubprojectId, selectedHeadingId]);
 
-  // Active expanded IDs (combines user toggled items + auto-expanded items matching search)
+  // Combined expanded IDs
   const activeExpandedIds = useMemo(() => {
     if (!searchQuery.trim()) return expandedIds;
     return new Set([...expandedIds, ...autoExpandIds]);
   }, [expandedIds, autoExpandIds, searchQuery]);
 
-  // Are all displayed summaries currently minimized?
   const isAllMinimized = useMemo(() => {
     if (currentSummaryIds.size === 0) return false;
     for (const id of currentSummaryIds) {
@@ -222,10 +287,8 @@ export function TrackerClient({
 
   const handleToggleMinimizeAll = () => {
     if (isAllMinimized) {
-      // Expand all
       setExpandedIds(new Set(currentSummaryIds));
     } else {
-      // Minimize all
       setExpandedIds(new Set());
     }
   };
@@ -339,35 +402,32 @@ export function TrackerClient({
 
   return (
     <div className="min-h-screen pb-12">
+      {/* 3-Tier Navigation Header */}
       <Header
         title="AVI Line 4 Site Progress"
         subtitle="MS Project Master & Linked Subprojects"
         role={role}
         isOffline={isOffline}
-        activeTab={activeTab}
-        tabs={tabs}
-        onSelectTab={(tabId) => {
-          setActiveTab(tabId);
-          // Expand summaries for the newly selected tab
-          const nodesToExpand: TaskNode[] =
-            tabId === 'all'
-              ? sections
-              : (() => {
-                  const found = sections.find((s) => s.id === tabId);
-                  if (!found) return sections;
-                  return found.children && found.children.length > 0
-                    ? found.children
-                    : [found];
-                })();
-          setExpandedIds((prev) => new Set([...prev, ...getAllSummaryIds(nodesToExpand)]));
-        }}
-
         onOpenSync={() => setIsSyncModalOpen(true)}
         onToggleSearch={handleToggleSearch}
         isSearchOpen={isSearchOpen}
+        subprojects={tier1Subprojects}
+        activeSubprojectId={selectedSubprojectId}
+        onSelectSubproject={(spId) => {
+          setSelectedSubprojectId(spId);
+          setSelectedHeadingId('all');
+        }}
+        headings={tier2Headings}
+        activeHeadingId={selectedHeadingId}
+        onSelectHeading={(hId) => {
+          setSelectedHeadingId(hId);
+          // Expand newly selected tier 3 items
+          setExpandedIds((prev) => new Set([...prev, ...getAllSummaryIds(displayedNodes)]));
+        }}
       />
 
       <main className="max-w-3xl mx-auto px-4 mt-2">
+        {/* Dynamic Summary Tiles for the currently active Tier view */}
         <SummaryTiles
           completedItems={stats.completedLeafTasks}
           totalItems={stats.totalLeafTasks}
@@ -415,31 +475,36 @@ export function TrackerClient({
                 {isAllMinimized ? (
                   <>
                     <ChevronsUpDown className="w-3.5 h-3.5 text-accent-light dark:text-accent-dark" />
-                    <span>Expand All</span>
+                    <span className="hidden sm:inline">Expand All</span>
+                    <span className="sm:hidden">Expand</span>
                   </>
                 ) : (
                   <>
                     <ChevronsDownUp className="w-3.5 h-3.5 text-accent-light dark:text-accent-dark" />
-                    <span>Minimize All</span>
+                    <span className="hidden sm:inline">Minimize All</span>
+                    <span className="sm:hidden">Minimize</span>
                   </>
                 )}
               </button>
             </div>
 
-            {/* Search Match Info & Cross-Tab Navigation */}
+            {/* Search Match Info & Cross-Tier Discovery */}
             {searchQuery.trim() && (
               <div className="flex items-center justify-between text-xs px-1 text-muted-light dark:text-muted-dark pt-1">
                 <span>
                   Found <strong className="text-fg-light dark:text-fg-dark">{matchCount}</strong> {matchCount === 1 ? 'task' : 'tasks'} matching &ldquo;{searchQuery}&rdquo;
-                  {activeTab !== 'all' && globalMatchCount > matchCount && (
+                  {globalMatchCount > matchCount && (
                     <>
                       {' '}&middot;{' '}
                       <button
                         type="button"
-                        onClick={() => setActiveTab('all')}
+                        onClick={() => {
+                          setSelectedSubprojectId('all');
+                          setSelectedHeadingId('all');
+                        }}
                         className="text-accent-light dark:text-accent-dark font-medium underline ml-1 hover:opacity-80"
                       >
-                        Found {globalMatchCount} matches across all sections &rarr;
+                        Found {globalMatchCount} matches across all subprojects &rarr;
                       </button>
                     </>
                   )}
@@ -455,22 +520,42 @@ export function TrackerClient({
             )}
           </div>
 
-          {/* Section Heading & Role Display */}
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h2 className="text-sm font-semibold text-fg-light dark:text-fg-dark">
-              {activeTab === 'all' ? 'All Sections & Items' : 'Section Items & Stages'}
-              {searchQuery && (
-                <span className="text-xs font-normal text-muted-light dark:text-muted-dark ml-2">
-                  (Filtered by &ldquo;{searchQuery}&rdquo;)
-                </span>
+          {/* Tier 3 Breadcrumb Header */}
+          <div className="flex items-center justify-between mb-2.5 px-1 flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-muted-light dark:text-muted-dark">
+              <span className="font-semibold text-fg-light dark:text-fg-dark">
+                {activeSubprojectNode ? activeSubprojectNode.name : 'All Subprojects'}
+              </span>
+              {selectedHeadingId !== 'all' && (
+                <>
+                  <span className="text-slate-400 dark:text-slate-600">&rsaquo;</span>
+                  <span className="font-semibold text-accent-light dark:text-accent-dark">
+                    {tier2Headings.find((h) => h.id === selectedHeadingId)?.label}
+                  </span>
+                  <span className="text-[11px] text-muted-light dark:text-muted-dark">
+                    ({displayedNodes.length} {displayedNodes.length === 1 ? 'item' : 'items'})
+                  </span>
+                </>
               )}
-            </h2>
-            <div className="text-xs text-muted-light dark:text-muted-dark">
-              Role: <span className="font-semibold uppercase text-accent-light dark:text-accent-dark">{role}</span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {selectedHeadingId !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedHeadingId('all')}
+                  className="text-xs text-accent-light dark:text-accent-dark hover:underline font-medium"
+                >
+                  &larr; View all headings
+                </button>
+              )}
+              <div className="text-xs text-muted-light dark:text-muted-dark">
+                Role: <span className="font-semibold uppercase text-accent-light dark:text-accent-dark">{role}</span>
+              </div>
             </div>
           </div>
 
-          {/* Task Tree with Live Expanded State & Highlighted Matches */}
+          {/* Tier 3: Task Tree (Last Headings & Actionable Stages) */}
           <TaskTree
             nodes={filteredNodes}
             role={role}

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { TaskNode, UserRole } from '@/lib/types';
 import { ChevronDown, ChevronRight, Lock, Unlock, Check, Clock, User } from 'lucide-react';
 
@@ -11,6 +11,34 @@ interface TaskTreeProps {
   onToggleTick: (task: TaskNode, isChecked: boolean) => void;
   onChangeDoneBy: (taskId: string, name: string) => void;
   onUnlock: (task: TaskNode) => void;
+  expandedIds: Set<string>;
+  onToggleExpand: (nodeId: string) => void;
+  searchQuery?: string;
+}
+
+function HighlightText({ text, query }: { text: string; query?: string }) {
+  if (!query || !query.trim() || !text) return <>{text}</>;
+  const q = query.trim();
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+  const parts = text.split(regex);
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === q.toLowerCase() ? (
+          <mark
+            key={i}
+            className="bg-yellow-200 dark:bg-amber-900/60 dark:text-amber-200 text-slate-900 rounded-xs px-0.5"
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
 }
 
 export const TaskTree: React.FC<TaskTreeProps> = ({
@@ -20,7 +48,19 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
   onToggleTick,
   onChangeDoneBy,
   onUnlock,
+  expandedIds,
+  onToggleExpand,
+  searchQuery,
 }) => {
+  if (nodes.length === 0) {
+    return (
+      <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-xl p-8 text-center text-muted-light dark:text-muted-dark">
+        <p className="text-sm font-medium">No tasks found</p>
+        <p className="text-xs mt-1">Try adjusting your search query or selecting a different tab.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3 pb-24">
       {nodes.map((node) => (
@@ -32,6 +72,9 @@ export const TaskTree: React.FC<TaskTreeProps> = ({
           onToggleTick={onToggleTick}
           onChangeDoneBy={onChangeDoneBy}
           onUnlock={onUnlock}
+          expandedIds={expandedIds}
+          onToggleExpand={onToggleExpand}
+          searchQuery={searchQuery}
         />
       ))}
     </div>
@@ -45,6 +88,9 @@ interface TreeNodeItemProps {
   onToggleTick: (task: TaskNode, isChecked: boolean) => void;
   onChangeDoneBy: (taskId: string, name: string) => void;
   onUnlock: (task: TaskNode) => void;
+  expandedIds: Set<string>;
+  onToggleExpand: (nodeId: string) => void;
+  searchQuery?: string;
 }
 
 const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
@@ -54,11 +100,12 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
   onToggleTick,
   onChangeDoneBy,
   onUnlock,
+  expandedIds,
+  onToggleExpand,
+  searchQuery,
 }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
-
   if (node.isSummary) {
-    // Calculate child stats
+    const isExpanded = expandedIds.has(node.id);
     const children = node.children || [];
     const leafChildren = children.filter((c) => !c.isSummary);
     const completedCount = leafChildren.filter(
@@ -69,24 +116,25 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
     const hasPending = children.some((c) => !!pendingTicks[c.id]);
 
     return (
-      <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-xl shadow-xs overflow-hidden">
+      <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-xl shadow-xs overflow-hidden transition-all">
         {/* Summary Card Header (Collapsible) */}
         <button
-          onClick={() => setIsExpanded(!isExpanded)}
+          onClick={() => onToggleExpand(node.id)}
           className="w-full text-left p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
         >
           <div className="flex items-start gap-2.5 min-w-0">
             <span className="mt-0.5 text-muted-light dark:text-muted-dark">
               {isExpanded ? (
-                <ChevronDown className="w-4 h-4" />
+                <ChevronDown className="w-4 h-4 transition-transform" />
               ) : (
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4 transition-transform" />
               )}
             </span>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-xs font-bold text-fg-light dark:text-fg-dark">
-                  {node.wbs ? `${node.wbs} ` : ''}{node.name}
+                  {node.wbs ? `${node.wbs} ` : ''}
+                  <HighlightText text={node.name} query={searchQuery} />
                 </span>
                 {hasPending && (
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
@@ -119,6 +167,9 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
                 onToggleTick={onToggleTick}
                 onChangeDoneBy={onChangeDoneBy}
                 onUnlock={onUnlock}
+                expandedIds={expandedIds}
+                onToggleExpand={onToggleExpand}
+                searchQuery={searchQuery}
               />
             ))}
           </div>
@@ -161,9 +212,14 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
 
           <div className="min-w-0">
             <p className="text-sm font-medium text-fg-light dark:text-fg-dark leading-snug">
-              {node.name}
+              <HighlightText text={node.name} query={searchQuery} />
             </p>
-            <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-light dark:text-muted-dark">
+            <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-light dark:text-muted-dark flex-wrap">
+              {node.wbs && (
+                <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                  WBS: <HighlightText text={node.wbs} query={searchQuery} />
+                </span>
+              )}
               {node.quotedHours > 0 && (
                 <span className="font-mono flex items-center gap-1">
                   <Clock className="w-3 h-3" />
@@ -203,7 +259,9 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
           <User className="w-3.5 h-3.5 text-muted-light dark:text-muted-dark flex-shrink-0" />
           {isLocked ? (
             <span className="text-xs text-muted-light dark:text-muted-dark font-medium">
-              Done by: <span className="text-fg-light dark:text-fg-dark">{doneByName || 'Name not recorded'}</span>
+              Done by: <span className="text-fg-light dark:text-fg-dark">
+                <HighlightText text={doneByName || 'Name not recorded'} query={searchQuery} />
+              </span>
             </span>
           ) : (
             <input

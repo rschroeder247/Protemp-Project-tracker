@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, RefreshCw, WifiOff } from 'lucide-react';
+import { CheckCircle2, RefreshCw, WifiOff, Search } from 'lucide-react';
 
 interface HeaderProps {
   title: string;
@@ -12,6 +12,8 @@ interface HeaderProps {
   tabs: { id: string; label: string; pct: number }[];
   onSelectTab: (id: string) => void;
   onOpenSync: () => void;
+  onToggleSearch?: () => void;
+  isSearchOpen?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,6 +25,8 @@ export const Header: React.FC<HeaderProps> = ({
   tabs,
   onSelectTab,
   onOpenSync,
+  onToggleSearch,
+  isSearchOpen = false,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-surface-light dark:bg-surface-dark border-b border-line-light dark:border-line-dark shadow-sm">
@@ -38,6 +42,22 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {onToggleSearch && (
+              <button
+                type="button"
+                onClick={onToggleSearch}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                  isSearchOpen
+                    ? 'bg-accent-light text-white dark:bg-accent-dark dark:text-slate-900 border-accent-light dark:border-accent-dark'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border-line-light dark:border-line-dark'
+                }`}
+                title="Search Tasks"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Search</span>
+              </button>
+            )}
+
             <button
               onClick={onOpenSync}
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-accent-light/10 text-accent-light dark:bg-accent-dark/20 dark:text-accent-dark hover:bg-accent-light/20 transition-colors border border-accent-light/20 dark:border-accent-dark/30"

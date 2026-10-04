@@ -16,6 +16,7 @@ interface HeaderProps {
   role: 'owner' | 'crew' | 'viewer';
   isOffline: boolean;
   onOpenSync: () => void;
+  isAutoSyncing?: boolean;
   onToggleSearch?: () => void;
   isSearchOpen?: boolean;
 
@@ -36,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   role,
   isOffline,
   onOpenSync,
+  isAutoSyncing = false,
   onToggleSearch,
   isSearchOpen = false,
   subprojects,
@@ -78,12 +80,16 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={onOpenSync}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-accent-light/10 text-accent-light dark:bg-accent-dark/20 dark:text-accent-dark hover:bg-accent-light/20 transition-colors border border-accent-light/20 dark:border-accent-dark/30"
-              title="Two-Way MS Project Sync"
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                isAutoSyncing
+                  ? 'bg-accent-light/20 text-accent-light dark:bg-accent-dark/30 dark:text-accent-dark border-accent-light/40 dark:border-accent-dark/50'
+                  : 'bg-accent-light/10 text-accent-light dark:bg-accent-dark/20 dark:text-accent-dark hover:bg-accent-light/20 border-accent-light/20 dark:border-accent-dark/30'
+              }`}
+              title={isAutoSyncing ? 'Syncing latest MS Project from OneDrive...' : 'Two-Way MS Project Sync'}
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sync MS Project</span>
-              <span className="sm:hidden">Sync</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{isAutoSyncing ? 'Syncing...' : 'Sync MS Project'}</span>
+              <span className="sm:hidden">{isAutoSyncing ? 'Syncing...' : 'Sync'}</span>
             </button>
 
             {isOffline ? (

@@ -14,7 +14,8 @@ import {
   filterTreeByQuery,
 } from '@/lib/calc';
 import { supabase } from '@/lib/supabase';
-import { Search, X, ChevronsDownUp, ChevronsUpDown, Layers } from 'lucide-react';
+import { Search, X, ChevronsDownUp, ChevronsUpDown, Layers, RefreshCw, CheckCircle2 } from 'lucide-react';
+
 
 interface TrackerClientProps {
   initialDbTasks: any[];
@@ -42,6 +43,10 @@ export function TrackerClient({
   const [isOffline, setIsOffline] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
+  // Auto-sync with MS Project state
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  const [autoSyncMessage, setAutoSyncMessage] = useState<string | null>(null);
+
   // Search & Expand/Minimize state
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -68,6 +73,49 @@ export function TrackerClient({
       console.warn('Refresh error:', e);
     }
   }, []);
+
+  // Auto-sync with MS Project from OneDrive on page open
+  useEffect(() => {
+    let isCancelled = false;
+
+    const performAutoSync = async () => {
+      setIsAutoSyncing(true);
+      try {
+        const res = await fetch('/api/onedrive-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: 'Master Project.xml' }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.warn('Auto-sync notice:', errData.error || res.statusText);
+          return;
+        }
+
+        const data = await res.json();
+        if (!isCancelled && data.success) {
+          setAutoSyncMessage(`Auto-synced ${data.taskCount} tasks from MS Project`);
+          await refreshData();
+          setTimeout(() => {
+            if (!isCancelled) setAutoSyncMessage(null);
+          }, 4500);
+        }
+      } catch (err: any) {
+        console.warn('Auto-sync notice:', err.message);
+      } finally {
+        if (!isCancelled) {
+          setIsAutoSyncing(false);
+        }
+      }
+    };
+
+    performAutoSync();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [refreshData]);
 
   useEffect(() => {
     try {
@@ -108,6 +156,7 @@ export function TrackerClient({
       window.removeEventListener('offline', handleOffline);
     };
   }, [refreshData]);
+
 
   // Construct Nested WBS Tree from dbTasks & dbProgress
   const allTasks = useMemo(() => {
@@ -409,6 +458,7 @@ export function TrackerClient({
         role={role}
         isOffline={isOffline}
         onOpenSync={() => setIsSyncModalOpen(true)}
+        isAutoSyncing={isAutoSyncing}
         onToggleSearch={handleToggleSearch}
         isSearchOpen={isSearchOpen}
         subprojects={tier1Subprojects}
@@ -425,6 +475,44 @@ export function TrackerClient({
           setExpandedIds((prev) => new Set([...prev, ...getAllSummaryIds(displayedNodes)]));
         }}
       />
+
+      {/* Auto-Sync Notification Banner */}
+      {(isAutoSyncing || autoSyncMessage) && (
+        <div className="max-w-3xl mx-auto px-4 mt-2">
+          <div
+            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium border shadow-xs transition-all ${
+              isAutoSyncing
+                ? 'bg-blue-50/80 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300 border-blue-200 dark:border-blue-900/50'
+                : 'bg-emerald-50/90 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  isAutoSyncing
+                    ? 'animate-spin text-blue-600 dark:text-blue-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }`}
+              />
+              <span>
+                {isAutoSyncing
+                  ? 'Syncing latest MS Project updates from OneDrive...'
+                  : autoSyncMessage}
+              </span>
+            </div>
+            {!isAutoSyncing && (
+              <button
+                type="button"
+                onClick={() => setAutoSyncMessage(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 rounded transition-colors"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <main className="max-w-3xl mx-auto px-4 mt-2">
         {/* Dynamic Summary Tiles for the currently active Tier view */}

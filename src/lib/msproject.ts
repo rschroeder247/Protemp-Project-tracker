@@ -28,7 +28,7 @@ export async function syncProjectTreeToSupabase(
 ) {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // 1. Ensure master and subprojects exist
+  // 1. Ensure master and subprojects exist in tracker_projects first to satisfy foreign keys
   const subprojectNames = Array.from(new Set(tasks.map((t) => t.subprojectName || projectName)));
 
   for (let i = 0; i < subprojectNames.length; i++) {
@@ -36,20 +36,25 @@ export async function syncProjectTreeToSupabase(
     const isMaster = spName === projectName;
     const spId = spName.toLowerCase().replace(/[^a-z0-9]/g, '-');
 
-    await supabase.from('tracker_projects').upsert({
+    const { error: projError } = await supabase.from('tracker_projects').upsert({
       id: spId,
       title: spName,
       short_title: spName.length > 20 ? spName.substring(0, 18) + '...' : spName,
       is_subproject: !isMaster,
       sort_order: i,
     });
+
+    if (projError) {
+      console.warn(`Warning upserting project ${spId}:`, projError);
+    }
   }
 
-  // 2. Upsert tasks with flexible WBS tree structure
+  // 2. Prepare task rows with consistent 'task_' ID prefix matching existing database schema
   const rows = tasks.map((t, idx) => {
     const spId = (t.subprojectName || projectName).toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const taskId = t.id.startsWith('task_') ? t.id : `task_${t.id}`;
     return {
-      id: `${spId}_${t.wbs || idx}`,
+      id: taskId,
       project_id: spId,
       wbs: t.wbs || `${idx + 1}`,
       outline_level: t.outlineLevel || 1,
@@ -62,9 +67,14 @@ export async function syncProjectTreeToSupabase(
     };
   });
 
-  const { error } = await supabase.from('tracker_tasks').upsert(rows);
-  if (error) {
-    throw new Error(`Failed to upsert tasks: ${error.message}`);
+  // 3. Batch upsert in chunks to avoid request size limitations
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabase.from('tracker_tasks').upsert(chunk);
+    if (error) {
+      throw new Error(`Failed to upsert tasks chunk ${i}: ${error.message}`);
+    }
   }
 
   return { success: true, count: rows.length };

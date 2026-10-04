@@ -18,25 +18,12 @@ export function parseIsoDurationToHours(durationStr: string): number {
   return Number((hours + minutes / 60 + seconds / 3600).toFixed(2));
 }
 
-/**
- * Parses an MS Project XML file string into our RawProjectTask model.
- */
-export function parseMsProjectXml(xmlContent: string): {
-  projectName: string;
-  tasks: RawProjectTask[];
-} {
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@_',
-    textNodeName: '#text',
-  });
-
-  const parsed = parser.parse(xmlContent);
-  const project = parsed.Project || parsed;
-
-  const projectName = project.Title || project.Name || 'Master Project';
-  const rawTasks = project.Tasks?.Task;
-
+function extractTasksFromXmlProject(
+  proj: any,
+  defaultSubproject: string = 'Master Project'
+): { projectName: string; tasks: RawProjectTask[] } {
+  const projectName = proj.Title || proj.Name || defaultSubproject;
+  const rawTasks = proj.Tasks?.Task;
   if (!rawTasks) {
     return { projectName, tasks: [] };
   }
@@ -47,16 +34,21 @@ export function parseMsProjectXml(xmlContent: string): {
   let currentSubproject = projectName;
 
   for (const t of taskList) {
-    // Skip UID 0 (project summary task itself if present)
     const uid = String(t.UID ?? t.ID ?? '');
     if (uid === '0') continue;
+
+    // In MS Project XML, linked subprojects are embedded as nested <Project> inside a <Task>!
+    if (t.Project) {
+      const nested = extractTasksFromXmlProject(t.Project, t.Name || currentSubproject);
+      tasks.push(...nested.tasks);
+      continue;
+    }
 
     const outlineLevel = parseInt(t.OutlineLevel || '1', 10);
     const isSummary = String(t.Summary) === '1' || String(t.Summary) === 'true';
     const name = String(t.Name || 'Unnamed Task').trim();
     const wbs = String(t.WBS || t.OutlineNumber || uid).trim();
 
-    // If it's a top-level outline (level 1), it defines the subproject container
     if (outlineLevel === 1) {
       currentSubproject = name;
     }
@@ -81,4 +73,24 @@ export function parseMsProjectXml(xmlContent: string): {
   }
 
   return { projectName, tasks };
+}
+
+/**
+ * Parses an MS Project XML file string into our RawProjectTask model.
+ * Fully supports master projects with nested linked subprojects.
+ */
+export function parseMsProjectXml(xmlContent: string): {
+  projectName: string;
+  tasks: RawProjectTask[];
+} {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    textNodeName: '#text',
+  });
+
+  const parsed = parser.parse(xmlContent);
+  const project = parsed.Project || parsed;
+
+  return extractTasksFromXmlProject(project, 'Master Project');
 }

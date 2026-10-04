@@ -22,7 +22,7 @@ End Function
 ' -------------------------------------------------------------------------
 ' DIRECTION 1: Push MS Project tasks -> Web Tracker
 ' -------------------------------------------------------------------------
-Public Sub PushMasterProjectToWebTracker()
+Public Sub PushMasterProjectToWebTracker(Optional ByVal isSilent As Boolean = False)
     On Error GoTo EH
     
     Dim pj As Object
@@ -34,7 +34,7 @@ Public Sub PushMasterProjectToWebTracker()
     On Error GoTo EH
     
     If pj Is Nothing Then
-        MsgBox "Microsoft Project is not open.", vbCritical
+        If Not isSilent Then MsgBox "Microsoft Project is not open.", vbCritical
         Exit Sub
     End If
     
@@ -44,8 +44,10 @@ Public Sub PushMasterProjectToWebTracker()
         If Dir(masterPath) <> "" Then
             pj.FileOpenEx masterPath, ReadOnly:=True
         Else
-            MsgBox "Please open your MS Project file before running this sync." & vbCrLf & _
-                   "Could not find default file at: " & masterPath, vbExclamation
+            If Not isSilent Then
+                MsgBox "Please open your MS Project file before running this sync." & vbCrLf & _
+                       "Could not find default file at: " & masterPath, vbExclamation
+            End If
             Exit Sub
         End If
     End If
@@ -54,7 +56,7 @@ Public Sub PushMasterProjectToWebTracker()
     Set tasksCollection = pj.ActiveProject.Tasks
     
     If tasksCollection.Count = 0 Then
-        MsgBox "No tasks found in active project.", vbExclamation
+        If Not isSilent Then MsgBox "No tasks found in active project.", vbExclamation
         Exit Sub
     End If
     
@@ -111,21 +113,27 @@ Public Sub PushMasterProjectToWebTracker()
     http.Send json
     
     If http.Status = 200 Then
-        MsgBox "Successfully synced " & taskCount & " tasks to the Web Tracker!" & vbCrLf & _
-               "The team on site can now view and tick the updated tasks.", vbInformation, "Sync Successful"
+        If Not isSilent Then
+            MsgBox "Successfully synced " & taskCount & " tasks to the Web Tracker!" & vbCrLf & _
+                   "The team on site can now view and tick the updated tasks.", vbInformation, "Sync Successful"
+        End If
     Else
-        MsgBox "Sync error (" & http.Status & "): " & http.responseText, vbCritical, "Sync Failed"
+        If Not isSilent Then
+            MsgBox "Sync error (" & http.Status & "): " & http.responseText, vbCritical, "Sync Failed"
+        End If
     End If
     Exit Sub
     
 EH:
-    MsgBox "Error pushing to tracker: " & Err.Description, vbCritical
+    If Not isSilent Then
+        MsgBox "Error pushing to tracker: " & Err.Description, vbCritical
+    End If
 End Sub
 
 ' -------------------------------------------------------------------------
 ' DIRECTION 2: Pull Site Progress -> MS Project (% Complete = 100%)
 ' -------------------------------------------------------------------------
-Public Sub PullSiteProgressIntoMSProject()
+Public Sub PullSiteProgressIntoMSProject(Optional ByVal isSilent As Boolean = False)
     On Error GoTo EH
     
     ' 1. Fetch completed tasks from API
@@ -135,12 +143,15 @@ Public Sub PullSiteProgressIntoMSProject()
     http.Send
     
     If http.Status <> 200 Then
-        MsgBox "Could not fetch site progress (" & http.Status & "): " & http.responseText, vbCritical
+        If Not isSilent Then
+            MsgBox "Could not fetch site progress (" & http.Status & "): " & http.responseText, vbCritical
+        End If
         Exit Sub
     End If
     
     Dim respText As String
     respText = http.responseText
+
     
     ' 2. Get active MS Project instance
     Dim pj As Object
@@ -198,14 +209,28 @@ Public Sub PullSiteProgressIntoMSProject()
     
     pj.FileSave
     
-    MsgBox "Pull Complete!" & vbCrLf & _
-           "Updated " & updatedCount & " task(s) to 100% complete in MS Project based on site ticks.", _
-           vbInformation, "Site Progress Imported"
+    If isSilent Then
+        If updatedCount > 0 Then
+            MsgBox "Protemp Auto-Sync Complete!" & vbCrLf & _
+                   "Updated " & updatedCount & " task(s) to 100% complete in MS Project based on site ticks.", _
+                   vbInformation, "Site Progress Synced"
+        Else
+            On Error Resume Next
+            pj.Application.StatusBar = "Protemp Tracker: Site progress is up to date."
+        End If
+    Else
+        MsgBox "Pull Complete!" & vbCrLf & _
+               "Updated " & updatedCount & " task(s) to 100% complete in MS Project based on site ticks.", _
+               vbInformation, "Site Progress Imported"
+    End If
     Exit Sub
     
 EH:
-    MsgBox "Error pulling site progress: " & Err.Description, vbCritical
+    If Not isSilent Then
+        MsgBox "Error pulling site progress: " & Err.Description, vbCritical
+    End If
 End Sub
+
 
 ' --- JSON Helpers for VBA Late-Binding ---
 Private Function CleanJson(ByVal s As String) As String

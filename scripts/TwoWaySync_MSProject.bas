@@ -15,9 +15,69 @@ Option Explicit
 Private Const API_BASE_URL As String = "https://protemp-project-tracker.vercel.app"
 Private Const RELATIVE_MASTER_PATH As String = "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
 
+Public IsExportingXml As Boolean
+
 Private Function GetMasterProjectPath() As String
     GetMasterProjectPath = Environ$("USERPROFILE") & RELATIVE_MASTER_PATH
 End Function
+
+' -------------------------------------------------------------------------
+' DIRECTION 0: Auto-Save XML when Project is Saved (Ctrl + S)
+' -------------------------------------------------------------------------
+Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optional ByVal isSilent As Boolean = True)
+    On Error GoTo EH
+    If IsExportingXml Then Exit Sub
+    IsExportingXml = True
+    
+    Dim targetPj As Object
+    If pj Is Nothing Then
+        On Error Resume Next
+        Set targetPj = ActiveProject
+        On Error GoTo EH
+    Else
+        Set targetPj = pj
+    End If
+    
+    If targetPj Is Nothing Then GoTo CleanUp
+    
+    ' Calculate the XML file path matching the project file
+    Dim xmlPath As String
+    If Len(targetPj.FullName) > 0 And InStr(targetPj.FullName, ".") > 0 Then
+        xmlPath = Left(targetPj.FullName, InStrRev(targetPj.FullName, ".")) & "xml"
+    Else
+        xmlPath = Environ$("USERPROFILE") & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
+    End If
+    
+    ' Suppress overwrite dialog so saving is completely seamless
+    Application.DisplayAlerts = False
+    
+    ' Export XML format
+    Application.FileSaveAs Name:=xmlPath, FormatID:="MSProject.XML"
+    
+    ' Update status bar
+    On Error Resume Next
+    Application.StatusBar = "Protemp Tracker: Auto-saved XML to " & xmlPath
+    On Error GoTo EH
+    
+    If Not isSilent Then
+        MsgBox "Successfully exported to XML:" & vbCrLf & xmlPath, vbInformation, "Auto-Export Complete"
+    End If
+
+CleanUp:
+    On Error Resume Next
+    Application.DisplayAlerts = True
+    IsExportingXml = False
+    Exit Sub
+
+EH:
+    On Error Resume Next
+    Application.DisplayAlerts = True
+    IsExportingXml = False
+    If Not isSilent Then
+        MsgBox "Notice: Could not automatically save XML: " & Err.Description, vbExclamation, "XML Export Warning"
+    End If
+End Sub
+
 
 ' -------------------------------------------------------------------------
 ' DIRECTION 1: Push MS Project tasks -> Web Tracker

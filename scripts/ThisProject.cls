@@ -29,6 +29,7 @@ End Sub
 
 Private Sub Project_BeforeSave(ByVal pj As Project, ByVal SaveAsUI As Boolean, Cancel As Boolean)
     On Error Resume Next
-    ' Optional: automatically push latest tasks to Web Tracker on save:
-    ' PushMasterProjectToWebTracker isSilent:=True
+    ' Automatically save the XML file whenever you push Save (Ctrl + S or File -> Save)
+    AutoExportProjectToXml pj:=pj, isSilent:=True
 End Sub
+

@@ -13,6 +13,7 @@ Option Explicit
 ' =========================================================================
 
 Private Const API_BASE_URL As String = "https://protemp-project-tracker.vercel.app"
+Private Const SYNC_API_KEY As String = "pt_sync_sec_2026_9824"
 Private Const RELATIVE_MASTER_PATH As String = "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.mpp"
 Private Const RELATIVE_XML_PATH As String = "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
 
@@ -217,6 +218,7 @@ Public Sub PushMasterProjectToWebTracker(Optional ByVal isSilent As Boolean = Fa
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     http.Open "POST", API_BASE_URL & "/api/sync-project", False
     http.setRequestHeader "Content-Type", "application/json"
+    http.setRequestHeader "x-api-key", SYNC_API_KEY
     http.Send json
     
     If http.Status = 200 Then
@@ -246,7 +248,8 @@ Public Sub PullSiteProgressIntoMSProject(Optional ByVal isSilent As Boolean = Fa
     ' 1. Fetch completed tasks from API
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
-    http.Open "GET", API_BASE_URL & "/api/export-progress?format=json", False
+    http.Open "GET", API_BASE_URL & "/api/export-progress?format=json&apiKey=" & SYNC_API_KEY, False
+    http.setRequestHeader "x-api-key", SYNC_API_KEY
     http.Send
     
     If http.Status <> 200 Then

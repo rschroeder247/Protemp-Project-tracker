@@ -6,6 +6,8 @@ import { SummaryTiles } from '@/components/SummaryTiles';
 import { TaskTree } from '@/components/TaskTree';
 import { SaveBar } from '@/components/SaveBar';
 import { SyncModal } from '@/components/SyncModal';
+import { LockScreen } from '@/components/LockScreen';
+import { ContractorAccessModal } from '@/components/ContractorAccessModal';
 import { TaskNode, UserRole } from '@/lib/types';
 import {
   calculateTreeStats,
@@ -25,9 +27,11 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  Shield,
+  Key,
+  Lock,
+  AlertCircle,
 } from 'lucide-react';
-
-
 
 interface TrackerClientProps {
   initialDbTasks: any[];
@@ -38,9 +42,130 @@ export function TrackerClient({
   initialDbTasks,
   initialDbProgress,
 }: TrackerClientProps) {
+  // Authentication & Role State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const [role, setRole] = useState<UserRole>('owner');
+  const [userName, setUserName] = useState<string>('Roland (Admin)');
+  const [allowedSubprojects, setAllowedSubprojects] = useState<string[]>([]);
+
+  // Modals for Security
+  const [isContractorModalOpen, setIsContractorModalOpen] = useState(false);
+  const [isElevateModalOpen, setIsElevateModalOpen] = useState(false);
+  const [elevatePassword, setElevatePassword] = useState('');
+  const [elevateError, setElevateError] = useState<string | null>(null);
+  const [isElevating, setIsElevating] = useState(false);
+
   const [dbTasks, setDbTasks] = useState<any[]>(initialDbTasks);
   const [dbProgress, setDbProgress] = useState<any[]>(initialDbProgress);
+
+  // Check persistent session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (data.authenticated) {
+          setIsAuthenticated(true);
+          setRole(data.role);
+          setUserName(data.name || (data.role === 'owner' ? 'Roland (Admin)' : 'Lindani'));
+          setAllowedSubprojects(data.allowedSubprojects || []);
+        } else {
+          // Check local session fallback
+          const localAuth = localStorage.getItem('protemp_auth_session');
+          if (localAuth) {
+            try {
+              const parsed = JSON.parse(localAuth);
+              if (parsed.role) {
+                setIsAuthenticated(true);
+                setRole(parsed.role);
+                setUserName(parsed.name || 'Technician');
+                setAllowedSubprojects(parsed.allowedSubprojects || []);
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('Session check warning:', err);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    checkSession();
+  }, []);
+
+  const handleAuthenticated = (auth: {
+    role: UserRole;
+    name: string;
+    allowedSubprojects: string[];
+  }) => {
+    setIsAuthenticated(true);
+    setRole(auth.role);
+    setUserName(auth.name);
+    setAllowedSubprojects(auth.allowedSubprojects);
+    try {
+      localStorage.setItem('protemp_auth_session', JSON.stringify(auth));
+      localStorage.setItem('protemp_remembered_name', auth.name);
+    } catch {}
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      localStorage.removeItem('protemp_auth_session');
+    } catch {}
+    setIsAuthenticated(false);
+  };
+
+  const handleElevateToAdmin = async () => {
+    if (!elevatePassword.trim()) {
+      setElevateError('Please enter the Admin password');
+      return;
+    }
+    setIsElevating(true);
+    setElevateError(null);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: elevatePassword.trim(), technicianName: 'Roland (Admin)' }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.role !== 'owner') {
+        setElevateError(data.error || 'Incorrect Admin password');
+        setIsElevating(false);
+        return;
+      }
+      setRole('owner');
+      setUserName('Roland (Admin)');
+      setIsElevateModalOpen(false);
+      setElevatePassword('');
+      try {
+        localStorage.setItem(
+          'protemp_auth_session',
+          JSON.stringify({ role: 'owner', name: 'Roland (Admin)', allowedSubprojects: [] })
+        );
+      } catch {}
+    } catch (err: any) {
+      setElevateError(err.message || 'Verification failed');
+    } finally {
+      setIsElevating(false);
+    }
+  };
+
+  const handleSaveContractorAllowed = async (newAllowed: string[]) => {
+    const res = await fetch('/api/auth/contractor-access', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowedSubprojects: newAllowed }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to save contractor access');
+    }
+    setAllowedSubprojects(newAllowed);
+  };
 
   // 3-Tier Navigation State
   // Tier 1: Subproject ID ('all' or specific subproject root id)
@@ -223,26 +348,60 @@ export function TrackerClient({
     return buildTaskTree(flatNodes);
   }, [dbTasks, dbProgress]);
 
+  // Filter subprojects if contractor has restricted access
+  const visibleTasks = useMemo(() => {
+    if (role !== 'contractor' || allowedSubprojects.length === 0) {
+      return allTasks;
+    }
+    const allowedSet = new Set(allowedSubprojects);
+
+    return allTasks
+      .map((root) => {
+        if (allowedSet.has(root.id) || allowedSet.has(root.projectId)) {
+          return root;
+        }
+        if (root.children && root.children.length > 0) {
+          const filteredChildren = root.children.filter(
+            (c) => allowedSet.has(c.id) || allowedSet.has(c.projectId)
+          );
+          if (filteredChildren.length > 0) {
+            return { ...root, children: filteredChildren };
+          }
+        }
+        return null;
+      })
+      .filter(Boolean) as TaskNode[];
+  }, [allTasks, role, allowedSubprojects]);
+
+  // List of subprojects Admin can assign to Contractors
+  const assignableSubprojects = useMemo(() => {
+    if (allTasks.length === 0) return [];
+    if (allTasks.length === 1 && allTasks[0].children && allTasks[0].children.length > 0) {
+      return [allTasks[0], ...allTasks[0].children];
+    }
+    return allTasks;
+  }, [allTasks]);
+
   // Default to the first subproject if available and currently on 'all'
   useEffect(() => {
-    if (allTasks.length === 1 && selectedSubprojectId === 'all') {
-      setSelectedSubprojectId(allTasks[0].id);
+    if (visibleTasks.length === 1 && selectedSubprojectId === 'all') {
+      setSelectedSubprojectId(visibleTasks[0].id);
     }
-  }, [allTasks, selectedSubprojectId]);
+  }, [visibleTasks, selectedSubprojectId]);
 
   // TIER 1: Subproject Buttons
   const tier1Subprojects: NavItem[] = useMemo(() => {
-    if (allTasks.length === 0) return [];
-    const totalStats = calculateTreeStats(allTasks, pendingTicks);
+    if (visibleTasks.length === 0) return [];
+    const totalStats = calculateTreeStats(visibleTasks, pendingTicks);
 
     const items: NavItem[] = [
       {
         id: 'all',
         label: 'Overview (All)',
         pct: Math.round(totalStats.taskPct),
-        count: allTasks.length,
+        count: visibleTasks.length,
       },
-      ...allTasks.map((sp) => {
+      ...visibleTasks.map((sp) => {
         const stats = calculateTreeStats([sp], pendingTicks);
         const shortName = sp.name
           .replace(/\(Quote.*?\)/i, '')
@@ -258,23 +417,23 @@ export function TrackerClient({
     ];
 
     return items;
-  }, [allTasks, pendingTicks]);
+  }, [visibleTasks, pendingTicks]);
 
   const activeSubprojectNode = useMemo(() => {
     if (selectedSubprojectId === 'all') return null;
-    return allTasks.find((sp) => sp.id === selectedSubprojectId) || null;
-  }, [allTasks, selectedSubprojectId]);
+    return visibleTasks.find((sp) => sp.id === selectedSubprojectId) || null;
+  }, [visibleTasks, selectedSubprojectId]);
 
   // TIER 2: First Headings under Active Subproject
   const tier2Headings: NavItem[] = useMemo(() => {
     const headingsSource: TaskNode[] = activeSubprojectNode
       ? activeSubprojectNode.children || []
-      : allTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+      : visibleTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
 
     if (headingsSource.length === 0) return [];
 
     const currentScopeStats = calculateTreeStats(
-      activeSubprojectNode ? [activeSubprojectNode] : allTasks,
+      activeSubprojectNode ? [activeSubprojectNode] : visibleTasks,
       pendingTicks
     );
 
@@ -301,18 +460,18 @@ export function TrackerClient({
     ];
 
     return items;
-  }, [allTasks, activeSubprojectNode, pendingTicks]);
+  }, [visibleTasks, activeSubprojectNode, pendingTicks]);
 
   // TIER 3: The Last Headings / Actionable Items
   const displayedNodes: TaskNode[] = useMemo(() => {
     const headingsSource: TaskNode[] = activeSubprojectNode
       ? activeSubprojectNode.children || []
-      : allTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+      : visibleTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
 
     if (selectedHeadingId === 'all') {
       return headingsSource.length > 0
         ? headingsSource
-        : (activeSubprojectNode ? [activeSubprojectNode] : allTasks);
+        : (activeSubprojectNode ? [activeSubprojectNode] : visibleTasks);
     }
 
     const matchedHeading = headingsSource.find((h) => h.id === selectedHeadingId);
@@ -325,7 +484,7 @@ export function TrackerClient({
 
     // Direct leaf task (milestones, single tasks)
     return [matchedHeading];
-  }, [allTasks, activeSubprojectNode, selectedHeadingId]);
+  }, [visibleTasks, activeSubprojectNode, selectedHeadingId]);
 
   // Calculate summary IDs for current displayed nodes
   const currentSummaryIds = useMemo(() => {
@@ -461,7 +620,10 @@ export function TrackerClient({
   };
 
   const handleUnlock = async (task: TaskNode) => {
-    if (role !== 'owner') return;
+    if (role !== 'owner') {
+      setIsElevateModalOpen(true);
+      return;
+    }
     try {
       const { error } = await supabase.rpc('save_tree_progress', {
         changes: [{ kind: 'unlock', task_id: task.id }],
@@ -521,6 +683,23 @@ export function TrackerClient({
     (p) => !p.doneByName || p.doneByName.trim().length === 0
   );
 
+  // Authentication Loading Screen
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <RefreshCw className="w-8 h-8 text-sky-500 animate-spin mb-3" />
+        <p className="text-xs text-slate-400 font-medium tracking-wide">
+          Verifying Protemp Security...
+        </p>
+      </div>
+    );
+  }
+
+  // Lock Screen Gate
+  if (!isAuthenticated) {
+    return <LockScreen onAuthenticated={handleAuthenticated} />;
+  }
+
   return (
     <div className="min-h-screen pb-12">
       {/* 3-Tier Navigation Header */}
@@ -528,11 +707,15 @@ export function TrackerClient({
         title="AVI Line 4 Site Progress"
         subtitle="MS Project Master & Linked Subprojects"
         role={role}
+        userName={userName}
         isOffline={isOffline}
         onOpenSync={() => setIsSyncModalOpen(true)}
         isAutoSyncing={isAutoSyncing}
         onToggleSearch={handleToggleSearch}
         isSearchOpen={isSearchOpen}
+        onOpenContractorAccess={() => setIsContractorModalOpen(true)}
+        onElevateAdmin={() => setIsElevateModalOpen(true)}
+        onLogout={handleLogout}
         subprojects={tier1Subprojects}
         activeSubprojectId={selectedSubprojectId}
         onSelectSubproject={(spId) => {
@@ -805,6 +988,94 @@ export function TrackerClient({
           setIsSyncModalOpen(false);
         }}
       />
+
+      {/* Contractor Subproject Access Modal (Admin only) */}
+      <ContractorAccessModal
+        isOpen={isContractorModalOpen}
+        onClose={() => setIsContractorModalOpen(false)}
+        subprojects={assignableSubprojects}
+        initialAllowed={allowedSubprojects}
+        onSaveAllowed={handleSaveContractorAllowed}
+      />
+
+      {/* Admin Elevation Modal */}
+      {isElevateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <h3 className="text-sm font-bold text-fg-light dark:text-fg-dark">
+                  Unlock Admin Privileges
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsElevateModalOpen(false);
+                  setElevatePassword('');
+                  setElevateError(null);
+                }}
+                className="p-1 rounded-lg text-muted-light hover:text-fg-light dark:hover:text-fg-dark transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-light dark:text-muted-dark">
+              Enter the Admin Password or Master PIN to unlock stage editing and project controls.
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleElevateToAdmin();
+              }}
+              className="space-y-3"
+            >
+              <input
+                type="password"
+                placeholder="Enter Admin password"
+                value={elevatePassword}
+                onChange={(e) => {
+                  setElevatePassword(e.target.value);
+                  setElevateError(null);
+                }}
+                autoFocus
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-line-light dark:border-line-dark bg-slate-50 dark:bg-slate-900 text-fg-light dark:text-fg-dark focus:outline-hidden focus:ring-1 focus:ring-purple-500"
+              />
+
+              {elevateError && (
+                <p className="text-xs text-rose-500 font-medium">{elevateError}</p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsElevateModalOpen(false);
+                    setElevatePassword('');
+                    setElevateError(null);
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-muted-light dark:text-muted-dark hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isElevating || !elevatePassword.trim()}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  {isElevating ? 'Verifying...' : 'Unlock Admin'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

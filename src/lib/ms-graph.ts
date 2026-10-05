@@ -45,7 +45,7 @@ async function searchDriveForFile(
   driveId: string,
   fileName: string,
   token: string
-): Promise<{ fileName: string; content: string; webUrl?: string } | null> {
+): Promise<{ fileName: string; content: string; webUrl?: string; lastModifiedDateTime?: string } | null> {
   try {
     const searchRes = await fetch(
       `https://graph.microsoft.com/v1.0/drives/${driveId}/root/search(q='${encodeURIComponent(
@@ -92,6 +92,7 @@ async function searchDriveForFile(
           fileName: targetFile.name,
           content,
           webUrl: targetFile.webUrl,
+          lastModifiedDateTime: targetFile.lastModifiedDateTime,
         };
       }
     }
@@ -107,8 +108,43 @@ async function searchDriveForFile(
  */
 export async function downloadFileFromOneDrive(
   fileName: string = 'Master Project.xml'
-): Promise<{ fileName: string; content: string; webUrl?: string }> {
+): Promise<{ fileName: string; content: string; webUrl?: string; lastModifiedDateTime?: string }> {
   const token = await getGraphAccessToken();
+
+  // 0. Fast-path: Check direct known SharePoint path first (< 1s)
+  const knownDriveId = 'b!aJuWp9LDrU21DuedJYC4tY_NzGRevhlNm5XuWgvDqs1wyQwrTeW9RLE212NNjDCH';
+  try {
+    const metaRes = await fetch(
+      `https://graph.microsoft.com/v1.0/drives/${knownDriveId}/root:/Protemp%20Operations/MS%20Project/${encodeURIComponent(
+        fileName
+      )}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      }
+    );
+    if (metaRes.ok) {
+      const meta = await metaRes.json();
+      const contentRes = await fetch(
+        `https://graph.microsoft.com/v1.0/drives/${knownDriveId}/items/${meta.id}/content`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }
+      );
+      if (contentRes.ok) {
+        const content = await contentRes.text();
+        return {
+          fileName: meta.name,
+          content,
+          webUrl: meta.webUrl,
+          lastModifiedDateTime: meta.lastModifiedDateTime,
+        };
+      }
+    }
+  } catch (e) {
+    // Fall back to exhaustive search
+  }
 
   // 1. Search in tenant-level drives
   try {

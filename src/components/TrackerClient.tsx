@@ -58,6 +58,7 @@ export function TrackerClient({
 
   const [dbTasks, setDbTasks] = useState<any[]>(initialDbTasks);
   const [dbProgress, setDbProgress] = useState<any[]>(initialDbProgress);
+  const [lastSyncedLabel, setLastSyncedLabel] = useState<string | null>(null);
 
   // Check persistent session on mount
   useEffect(() => {
@@ -259,12 +260,22 @@ export function TrackerClient({
 
         const data = await res.json();
         if (data.success) {
-          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          setAutoSyncMessage(`Successfully updated ${data.taskCount} tasks from MS Project at ${timeStr}`);
+          let timeLabel = '';
+          if (data.lastModifiedDateTime) {
+            const fileDate = new Date(data.lastModifiedDateTime);
+            const timeStr = fileDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            timeLabel = `(File saved: ${timeStr})`;
+            setLastSyncedLabel(timeStr);
+          } else {
+            const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            timeLabel = `(at ${nowStr})`;
+            setLastSyncedLabel(nowStr);
+          }
+          setAutoSyncMessage(`Updated ${data.taskCount} tasks from MS Project ${timeLabel}`);
           await refreshData();
           setTimeout(() => {
             setAutoSyncMessage(null);
-          }, 6000);
+          }, 7000);
         }
       } catch (err: any) {
         console.warn('Sync notice:', err.message);
@@ -722,6 +733,7 @@ export function TrackerClient({
         onOpenSync={() => setIsSyncModalOpen(true)}
         onQuickSync={() => triggerCloudSync(true)}
         isAutoSyncing={isAutoSyncing}
+        lastSyncedLabel={lastSyncedLabel}
         onToggleSearch={handleToggleSearch}
         isSearchOpen={isSearchOpen}
         onOpenContractorAccess={() => setIsContractorModalOpen(true)}

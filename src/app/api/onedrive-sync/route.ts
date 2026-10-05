@@ -4,6 +4,7 @@ import { parseMsProjectXml } from '@/lib/msproject-xml';
 import { syncProjectTreeToSupabase } from '@/lib/msproject';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Fetch file directly from OneDrive in the cloud
-    const { content, webUrl } = await downloadFileFromOneDrive(fileName);
+    const { content, webUrl, lastModifiedDateTime } = await downloadFileFromOneDrive(fileName);
 
     // 2. Parse MS Project XML
     const parsed = parseMsProjectXml(content);
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
       projectName: parsed.projectName,
       taskCount: result.count,
       webUrl,
+      lastModifiedDateTime,
     });
   } catch (error: any) {
     console.error('OneDrive sync error:', error);

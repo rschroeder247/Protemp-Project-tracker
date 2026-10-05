@@ -33,6 +33,7 @@ interface HeaderProps {
   onOpenSync: () => void;
   onQuickSync?: () => void;
   isAutoSyncing?: boolean;
+  lastSyncedLabel?: string | null;
   onToggleSearch?: () => void;
   isSearchOpen?: boolean;
   onOpenContractorAccess?: () => void;
@@ -59,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSync,
   onQuickSync,
   isAutoSyncing = false,
+  lastSyncedLabel,
   onToggleSearch,
   isSearchOpen = false,
   onOpenContractorAccess,
@@ -159,30 +161,37 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Sync MS Project Button (Admin and Staff only) */}
             {role !== 'contractor' && (
-              <div className="inline-flex items-center rounded-full border border-accent-light/30 dark:border-accent-dark/40 bg-accent-light/10 dark:bg-accent-dark/20 p-0.5">
-                <button
-                  type="button"
-                  onClick={onQuickSync || onOpenSync}
-                  disabled={isAutoSyncing}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                    isAutoSyncing
-                      ? 'text-accent-light dark:text-accent-dark cursor-wait'
-                      : 'text-accent-light dark:text-accent-dark hover:bg-accent-light/20 dark:hover:bg-accent-dark/30'
-                  }`}
-                  title={isAutoSyncing ? 'Syncing latest MS Project from OneDrive...' : '1-Click Sync latest MS Project from OneDrive'}
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin' : ''}`} />
-                  <span className="hidden sm:inline">{isAutoSyncing ? 'Syncing...' : 'Sync MS Project'}</span>
-                  <span className="sm:hidden">{isAutoSyncing ? 'Syncing...' : 'Sync'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onOpenSync}
-                  className="px-1.5 py-0.5 text-accent-light/70 dark:text-accent-dark/70 hover:text-accent-light dark:hover:text-accent-dark transition-colors"
-                  title="Upload XML file or view sync details"
-                >
-                  <Upload className="w-3 h-3" />
-                </button>
+              <div className="inline-flex items-center gap-1.5">
+                <div className="inline-flex items-center rounded-full border border-accent-light/30 dark:border-accent-dark/40 bg-accent-light/10 dark:bg-accent-dark/20 p-0.5">
+                  <button
+                    type="button"
+                    onClick={onQuickSync || onOpenSync}
+                    disabled={isAutoSyncing}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                      isAutoSyncing
+                        ? 'text-accent-light dark:text-accent-dark cursor-wait'
+                        : 'text-accent-light dark:text-accent-dark hover:bg-accent-light/20 dark:hover:bg-accent-dark/30'
+                    }`}
+                    title={isAutoSyncing ? 'Syncing latest MS Project from OneDrive...' : '1-Click Sync latest MS Project from OneDrive'}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">{isAutoSyncing ? 'Syncing...' : 'Sync MS Project'}</span>
+                    <span className="sm:hidden">{isAutoSyncing ? 'Syncing...' : 'Sync'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOpenSync}
+                    className="px-1.5 py-0.5 text-accent-light/70 dark:text-accent-dark/70 hover:text-accent-light dark:hover:text-accent-dark transition-colors"
+                    title="Upload XML file or view sync details"
+                  >
+                    <Upload className="w-3 h-3" />
+                  </button>
+                </div>
+                {lastSyncedLabel && !isAutoSyncing && (
+                  <span className="hidden lg:inline text-[10px] text-muted-light dark:text-muted-dark whitespace-nowrap bg-surface-elevated-light dark:bg-surface-elevated-dark px-2 py-0.5 rounded-full border border-line-light dark:border-line-dark">
+                    Saved: {lastSyncedLabel}
+                  </span>
+                )}
               </div>
             )}
 

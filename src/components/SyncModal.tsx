@@ -41,9 +41,15 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         throw new Error(data.error || 'Failed to sync from OneDrive');
       }
 
+      let timeNote = '';
+      if (data.lastModifiedDateTime) {
+        const fileTime = new Date(data.lastModifiedDateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        timeNote = ` (Saved: ${fileTime})`;
+      }
+
       setStatusMessage({
         type: 'success',
-        text: `Cloud sync complete! Fetched ${data.taskCount} tasks from "${data.fileName}" on OneDrive.`,
+        text: `Cloud sync complete! Fetched ${data.taskCount} tasks from "${data.fileName}"${timeNote}.`,
       });
 
       setTimeout(() => {

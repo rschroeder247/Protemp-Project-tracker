@@ -233,17 +233,17 @@ export function TrackerClient({
   // TIER 1: Subproject Buttons
   const tier1Subprojects: NavItem[] = useMemo(() => {
     if (allTasks.length === 0) return [];
-    const totalStats = calculateTreeStats(allTasks);
+    const totalStats = calculateTreeStats(allTasks, pendingTicks);
 
     const items: NavItem[] = [
       {
         id: 'all',
         label: 'Overview (All)',
-        pct: Math.round(totalStats.hoursPct),
+        pct: Math.round(totalStats.taskPct),
         count: allTasks.length,
       },
       ...allTasks.map((sp) => {
-        const stats = calculateTreeStats([sp]);
+        const stats = calculateTreeStats([sp], pendingTicks);
         const shortName = sp.name
           .replace(/\(Quote.*?\)/i, '')
           .replace(/\(Motor.*?\)/i, '')
@@ -251,14 +251,14 @@ export function TrackerClient({
         return {
           id: sp.id,
           label: shortName.length > 25 ? shortName.substring(0, 23) + '...' : shortName,
-          pct: Math.round(stats.hoursPct),
+          pct: Math.round(stats.taskPct),
           count: sp.children ? sp.children.length : 1,
         };
       }),
     ];
 
     return items;
-  }, [allTasks]);
+  }, [allTasks, pendingTicks]);
 
   const activeSubprojectNode = useMemo(() => {
     if (selectedSubprojectId === 'all') return null;
@@ -274,18 +274,19 @@ export function TrackerClient({
     if (headingsSource.length === 0) return [];
 
     const currentScopeStats = calculateTreeStats(
-      activeSubprojectNode ? [activeSubprojectNode] : allTasks
+      activeSubprojectNode ? [activeSubprojectNode] : allTasks,
+      pendingTicks
     );
 
     const items: NavItem[] = [
       {
         id: 'all',
         label: 'All Headings',
-        pct: Math.round(currentScopeStats.hoursPct),
+        pct: Math.round(currentScopeStats.taskPct),
         count: headingsSource.length,
       },
       ...headingsSource.map((h) => {
-        const stats = calculateTreeStats([h]);
+        const stats = calculateTreeStats([h], pendingTicks);
         const cleanName = h.name
           .replace(/\(Quote.*?\)/i, '')
           .replace(/\(Motor.*?\)/i, '')
@@ -293,14 +294,14 @@ export function TrackerClient({
         return {
           id: h.id,
           label: cleanName.length > 28 ? cleanName.substring(0, 26) + '...' : cleanName,
-          pct: Math.round(stats.hoursPct),
+          pct: Math.round(stats.taskPct),
           count: h.children ? h.children.length : 0,
         };
       }),
     ];
 
     return items;
-  }, [allTasks, activeSubprojectNode]);
+  }, [allTasks, activeSubprojectNode, pendingTicks]);
 
   // TIER 3: The Last Headings / Actionable Items
   const displayedNodes: TaskNode[] = useMemo(() => {
@@ -414,7 +415,10 @@ export function TrackerClient({
     });
   };
 
-  const stats = useMemo(() => calculateTreeStats(displayedNodes), [displayedNodes]);
+  const stats = useMemo(
+    () => calculateTreeStats(displayedNodes, pendingTicks),
+    [displayedNodes, pendingTicks]
+  );
 
   const updatePending = (
     newPending: Record<string, { doneByName: string; tickedAt: string }>
@@ -571,9 +575,11 @@ export function TrackerClient({
           totalItems={stats.totalLeafTasks}
           completedStages={stats.completedLeafTasks}
           totalStages={stats.totalLeafTasks}
-          workPct={stats.hoursPct}
+          workPct={stats.taskPct}
           earnedHours={stats.earnedHours}
           quotedHours={stats.totalQuotedHours}
+          completedPanels={stats.completedPanels}
+          totalPanels={stats.totalPanels}
         />
 
         <div className="mt-4">

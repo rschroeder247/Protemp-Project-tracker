@@ -5,24 +5,47 @@ import { TaskNode, ProjectSummary } from './types';
  * Leaf tasks provide the actual hours and completion state.
  * Summary tasks roll up completed tasks and earned hours from their descendants.
  */
-export function calculateTreeStats(tasks: TaskNode[]): {
+export function calculateTreeStats(
+  tasks: TaskNode[],
+  pendingTicks?: Record<string, any>
+): {
   totalLeafTasks: number;
   completedLeafTasks: number;
+  taskPct: number;
   totalQuotedHours: number;
   earnedHours: number;
   hoursPct: number;
+  totalPanels: number;
+  completedPanels: number;
 } {
   let totalLeafTasks = 0;
   let completedLeafTasks = 0;
   let totalQuotedHours = 0;
   let earnedHours = 0;
+  let totalPanels = 0;
+  let completedPanels = 0;
 
   function traverse(node: TaskNode) {
+    // Check if this summary represents a panel/box unit (a summary whose children are leaf stages)
+    if (node.isSummary && node.children && node.children.length > 0) {
+      const isLeafSummary = node.children.every((c) => !c.isSummary);
+      if (isLeafSummary) {
+        totalPanels += 1;
+        const allDone = node.children.every(
+          (c) => c.isLocked || (pendingTicks && !!pendingTicks[c.id])
+        );
+        if (allDone) {
+          completedPanels += 1;
+        }
+      }
+    }
+
     if (!node.isSummary) {
       totalLeafTasks += 1;
       const hrs = Number(node.quotedHours) || 0;
       totalQuotedHours += hrs;
-      if (node.isLocked) {
+      const isDone = node.isLocked || (pendingTicks && !!pendingTicks[node.id]);
+      if (isDone) {
         completedLeafTasks += 1;
         earnedHours += hrs;
       }
@@ -38,14 +61,18 @@ export function calculateTreeStats(tasks: TaskNode[]): {
     traverse(t);
   }
 
+  const taskPct = totalLeafTasks > 0 ? (completedLeafTasks / totalLeafTasks) * 100 : 0;
   const hoursPct = totalQuotedHours > 0 ? (earnedHours / totalQuotedHours) * 100 : 0;
 
   return {
     totalLeafTasks,
     completedLeafTasks,
+    taskPct: Number(taskPct.toFixed(1)),
     totalQuotedHours: Number(totalQuotedHours.toFixed(1)),
     earnedHours: Number(earnedHours.toFixed(1)),
     hoursPct: Number(hoursPct.toFixed(1)),
+    totalPanels,
+    completedPanels,
   };
 }
 

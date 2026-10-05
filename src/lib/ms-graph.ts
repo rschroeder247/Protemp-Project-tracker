@@ -6,7 +6,14 @@ const TENANT_ID = process.env.MS_TENANT_ID || '';
 const CLIENT_ID = process.env.MS_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.MS_CLIENT_SECRET || '';
 
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
 export async function getGraphAccessToken(): Promise<string> {
+  const now = Date.now();
+  if (cachedToken && cachedToken.expiresAt > now + 60000) {
+    return cachedToken.token;
+  }
+
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     client_secret: CLIENT_SECRET,
@@ -30,6 +37,12 @@ export async function getGraphAccessToken(): Promise<string> {
       `Failed to obtain MS Graph token: ${data.error_description || data.error}`
     );
   }
+
+  const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 3600;
+  cachedToken = {
+    token: data.access_token,
+    expiresAt: now + expiresInSec * 1000,
+  };
 
   return data.access_token;
 }

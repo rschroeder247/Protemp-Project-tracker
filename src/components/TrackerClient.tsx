@@ -60,6 +60,19 @@ export function TrackerClient({
   const [dbProgress, setDbProgress] = useState<any[]>(initialDbProgress);
   const [lastSyncedLabel, setLastSyncedLabel] = useState<string | null>(null);
 
+  // Synchronize state whenever fresh server props arrive
+  useEffect(() => {
+    if (initialDbTasks && initialDbTasks.length > 0) {
+      setDbTasks(initialDbTasks);
+    }
+  }, [initialDbTasks]);
+
+  useEffect(() => {
+    if (initialDbProgress) {
+      setDbProgress(initialDbProgress);
+    }
+  }, [initialDbProgress]);
+
   // Check persistent session on mount
   useEffect(() => {
     const checkSession = async () => {
@@ -216,18 +229,21 @@ export function TrackerClient({
   // Reload data from Supabase
   const refreshData = useCallback(async () => {
     try {
-      const { data: tData } = await supabase
+      const { data: tData, error: tErr } = await supabase
         .from('tracker_tasks')
         .select('*')
         .order('sort_order', { ascending: true })
         .limit(3000);
 
-      const { data: pData } = await supabase
+      const { data: pData, error: pErr } = await supabase
         .from('tracker_task_progress')
         .select('*');
 
-      if (tData) setDbTasks(tData);
-      if (pData) setDbProgress(pData || []);
+      if (tErr) console.warn('Refresh tasks notice:', tErr);
+      if (pErr) console.warn('Refresh progress notice:', pErr);
+
+      if (tData && tData.length > 0) setDbTasks([...tData]);
+      if (pData) setDbProgress([...pData]);
     } catch (e) {
       console.warn('Refresh error:', e);
     }
@@ -271,8 +287,18 @@ export function TrackerClient({
             timeLabel = `(at ${nowStr})`;
             setLastSyncedLabel(nowStr);
           }
-          setAutoSyncMessage(`Updated ${data.taskCount} tasks from MS Project ${timeLabel}`);
+
           await refreshData();
+
+          if (isManual) {
+            setAutoSyncMessage(`Updated ${data.taskCount} tasks from MS Project ${timeLabel}. Refreshing view...`);
+            setTimeout(() => {
+              window.location.reload();
+            }, 700);
+            return;
+          }
+
+          setAutoSyncMessage(`Updated ${data.taskCount} tasks from MS Project ${timeLabel}`);
           setTimeout(() => {
             setAutoSyncMessage(null);
           }, 7000);

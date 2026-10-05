@@ -54,7 +54,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
       setTimeout(() => {
         onSyncComplete();
-      }, 1500);
+        window.location.reload();
+      }, 1000);
     } catch (err: any) {
       setStatusMessage({
         type: 'error',

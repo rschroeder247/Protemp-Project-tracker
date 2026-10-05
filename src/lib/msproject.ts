@@ -32,22 +32,21 @@ export async function syncProjectTreeToSupabase(
   // 1. Ensure master and subprojects exist in tracker_projects first to satisfy foreign keys
   const subprojectNames = Array.from(new Set(tasks.map((t) => t.subprojectName || projectName)));
 
-  for (let i = 0; i < subprojectNames.length; i++) {
-    const spName = subprojectNames[i];
+  const projRows = subprojectNames.map((spName, i) => {
     const isMaster = spName === projectName;
     const spId = spName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-
-    const { error: projError } = await supabase.from('tracker_projects').upsert({
+    return {
       id: spId,
       title: spName,
       short_title: spName.length > 20 ? spName.substring(0, 18) + '...' : spName,
       is_subproject: !isMaster,
       sort_order: i,
-    });
+    };
+  });
 
-    if (projError) {
-      console.warn(`Warning upserting project ${spId}:`, projError);
-    }
+  const { error: projError } = await supabase.from('tracker_projects').upsert(projRows);
+  if (projError) {
+    console.warn('Warning upserting projects:', projError);
   }
 
   // 2. Prepare task rows with consistent 'task_' ID prefix matching existing database schema
@@ -68,8 +67,8 @@ export async function syncProjectTreeToSupabase(
     };
   });
 
-  // 3. Batch upsert in chunks to avoid request size limitations
-  const CHUNK_SIZE = 400;
+  // 3. Batch upsert in chunks (1000 rows max per Supabase PostgREST recommendation)
+  const CHUNK_SIZE = 1000;
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
     const chunk = rows.slice(i, i + CHUNK_SIZE);
     const { error } = await supabase.from('tracker_tasks').upsert(chunk);

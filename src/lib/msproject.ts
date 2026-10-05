@@ -78,6 +78,35 @@ export async function syncProjectTreeToSupabase(
     }
   }
 
+  // 3b. Automatically prune deleted/obsolete tasks that no longer exist in MS Project
+  const syncedProjectIds = Array.from(new Set(rows.map((r) => r.project_id)));
+  const activeTaskIdSet = new Set(rows.map((r) => r.id));
+
+  const { data: existingDbTasks } = await supabase
+    .from('tracker_tasks')
+    .select('id')
+    .in('project_id', syncedProjectIds);
+
+  if (existingDbTasks && existingDbTasks.length > 0) {
+    const toDeleteIds = existingDbTasks
+      .map((t) => t.id)
+      .filter((id) => !activeTaskIdSet.has(id));
+
+    if (toDeleteIds.length > 0) {
+      // Remove any progress records first to maintain foreign key integrity
+      await supabase
+        .from('tracker_task_progress')
+        .delete()
+        .in('task_id', toDeleteIds);
+
+      // Remove obsolete tasks
+      await supabase
+        .from('tracker_tasks')
+        .delete()
+        .in('id', toDeleteIds);
+    }
+  }
+
   // 4. Also sync progress for leaf tasks that are 100% complete in MS Project
   const completedLeafTasks = tasks.filter(
     (t) => !t.isSummary && (t.percentComplete || 0) >= 100

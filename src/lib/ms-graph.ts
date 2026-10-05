@@ -60,9 +60,23 @@ async function searchDriveForFile(
     const searchData = await searchRes.json();
     const files = searchData.value || [];
 
-    const targetFile = files.find(
-      (f: any) => f.name.toLowerCase() === fileName.toLowerCase()
-    );
+    const matchingFiles = files
+      .filter((f: any) => f.name && f.name.toLowerCase() === fileName.toLowerCase())
+      .sort((a: any, b: any) => {
+        // Deprioritize folders like "new folder", "archive", "old"
+        const aUrl = (a.webUrl || '').toLowerCase();
+        const bUrl = (b.webUrl || '').toLowerCase();
+        const aOld = aUrl.includes('new%20folder') || aUrl.includes('archive') || aUrl.includes('temp');
+        const bOld = bUrl.includes('new%20folder') || bUrl.includes('archive') || bUrl.includes('temp');
+        if (aOld && !bOld) return 1;
+        if (!aOld && bOld) return -1;
+        // Prioritize newest modified date
+        const timeA = new Date(a.lastModifiedDateTime || 0).getTime();
+        const timeB = new Date(b.lastModifiedDateTime || 0).getTime();
+        return timeB - timeA;
+      });
+
+    const targetFile = matchingFiles[0];
 
     if (targetFile) {
       const contentRes = await fetch(

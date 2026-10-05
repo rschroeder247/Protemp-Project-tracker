@@ -19,6 +19,14 @@ Private Const RELATIVE_XML_PATH As String = "\OneDrive - Protemp\Protemp Operati
 
 Public IsExportingXml As Boolean
 
+Public Function GetMasterProjectPath() As String
+    GetMasterProjectPath = Environ$("USERPROFILE") & RELATIVE_MASTER_PATH
+End Function
+
+Public Function GetMasterXmlPath() As String
+    GetMasterXmlPath = Environ$("USERPROFILE") & RELATIVE_XML_PATH
+End Function
+
 ' -------------------------------------------------------------------------
 ' DIRECTION 0: Auto-Save XML when Project is Saved
 ' -------------------------------------------------------------------------
@@ -171,6 +179,9 @@ Public Sub PushMasterProjectToWebTracker(Optional ByVal isSilent As Boolean = Fa
     Dim json As String
     json = "{""projectName"": """ & CleanJson(pj.ActiveProject.Name) & """, ""tasks"": ["
     
+    ' Also ensure the local XML copy is fresh
+    AutoExportProjectToXml pj:=pj, isSilent:=True
+    
     Dim t As Object
     Dim isFirst As Boolean
     isFirst = True
@@ -199,13 +210,35 @@ Public Sub PushMasterProjectToWebTracker(Optional ByVal isSilent As Boolean = Fa
             quotedHrs = Round(t.Work / 60#, 2)
             On Error GoTo EH
             
+            Dim durDays As Double
+            durDays = 0
+            On Error Resume Next
+            durDays = Round(t.Duration / 480#, 2)
+            On Error GoTo EH
+            
+            Dim pctComp As Long
+            pctComp = 0
+            On Error Resume Next
+            pctComp = CLng(t.PercentComplete)
+            On Error GoTo EH
+            
+            Dim taskNotes As String
+            taskNotes = ""
+            On Error Resume Next
+            taskNotes = CleanJson(t.Notes)
+            On Error GoTo EH
+            
             json = json & "{"
-            json = json & """id"": """ & t.UniqueID & ""","
+            json = json & """id"": """ & t.ID & ""","
+            json = json & """uniqueId"": """ & t.UniqueID & ""","
             json = json & """wbs"": """ & t.WBS & ""","
             json = json & """outlineLevel"": " & t.OutlineLevel & ","
             json = json & """name"": """ & CleanJson(t.Name) & ""","
             json = json & """isSummary"": " & IIf(t.Summary, "true", "false") & ","
             json = json & """quotedHours"": " & Replace(Format(quotedHrs, "0.00"), ",", ".") & ","
+            json = json & """durationDays"": " & Replace(Format(durDays, "0.00"), ",", ".") & ","
+            json = json & """percentComplete"": " & pctComp & ","
+            json = json & """notes"": """ & taskNotes & ""","
             json = json & """subprojectName"": """ & CleanJson(subProj) & """"
             json = json & "}"
         End If

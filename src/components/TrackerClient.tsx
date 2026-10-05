@@ -108,6 +108,7 @@ export function TrackerClient({
       localStorage.setItem('protemp_auth_session', JSON.stringify(auth));
       localStorage.setItem('protemp_remembered_name', auth.name);
     } catch {}
+    refreshData();
   };
 
   const handleLogout = async () => {
@@ -231,12 +232,13 @@ export function TrackerClient({
     }
   }, []);
 
-  // Auto-sync with MS Project from OneDrive on page open
-  useEffect(() => {
-    let isCancelled = false;
-
-    const performAutoSync = async () => {
+  // Two-way sync with MS Project from OneDrive
+  const triggerCloudSync = useCallback(
+    async (isManual = false) => {
       setIsAutoSyncing(true);
+      if (isManual) {
+        setAutoSyncMessage('Connecting to OneDrive & updating from MS Project...');
+      }
       try {
         const res = await fetch('/api/onedrive-sync', {
           method: 'POST',
@@ -246,33 +248,41 @@ export function TrackerClient({
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          console.warn('Auto-sync notice:', errData.error || res.statusText);
+          const msg = errData.error || res.statusText || 'Sync failed';
+          console.warn('Sync notice:', msg);
+          if (isManual) {
+            setAutoSyncMessage(`Sync notice: ${msg}`);
+            setTimeout(() => setAutoSyncMessage(null), 6000);
+          }
           return;
         }
 
         const data = await res.json();
-        if (!isCancelled && data.success) {
-          setAutoSyncMessage(`Auto-synced ${data.taskCount} tasks from MS Project`);
+        if (data.success) {
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setAutoSyncMessage(`Successfully updated ${data.taskCount} tasks from MS Project at ${timeStr}`);
           await refreshData();
           setTimeout(() => {
-            if (!isCancelled) setAutoSyncMessage(null);
-          }, 4500);
+            setAutoSyncMessage(null);
+          }, 6000);
         }
       } catch (err: any) {
-        console.warn('Auto-sync notice:', err.message);
-      } finally {
-        if (!isCancelled) {
-          setIsAutoSyncing(false);
+        console.warn('Sync notice:', err.message);
+        if (isManual) {
+          setAutoSyncMessage(`Sync error: ${err.message}`);
+          setTimeout(() => setAutoSyncMessage(null), 6000);
         }
+      } finally {
+        setIsAutoSyncing(false);
       }
-    };
+    },
+    [refreshData]
+  );
 
-    performAutoSync();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [refreshData]);
+  // Auto-sync with MS Project from OneDrive on page open
+  useEffect(() => {
+    triggerCloudSync(false);
+  }, [triggerCloudSync]);
 
   useEffect(() => {
     try {
@@ -710,6 +720,7 @@ export function TrackerClient({
         userName={userName}
         isOffline={isOffline}
         onOpenSync={() => setIsSyncModalOpen(true)}
+        onQuickSync={() => triggerCloudSync(true)}
         isAutoSyncing={isAutoSyncing}
         onToggleSearch={handleToggleSearch}
         isSearchOpen={isSearchOpen}

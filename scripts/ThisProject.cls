@@ -18,7 +18,8 @@ Option Explicit
 '    complete, and adds the technician's name to the Task Notes.
 '
 ' 2. Project_BeforeSave:
-'    Fires automatically before saving. (Optional auto-push).
+'    Fires automatically before saving (Ctrl + S).
+'    Automatically saves the XML export and pushes latest updates to Web Tracker.
 ' =========================================================================
 
 Private Sub Project_Open(ByVal pj As Project)
@@ -27,5 +28,8 @@ Private Sub Project_Open(ByVal pj As Project)
     PullSiteProgressIntoMSProject isSilent:=True
 End Sub
 
-
-
+Private Sub Project_BeforeSave(ByVal pj As Project, ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    On Error Resume Next
+    ' Automatically push latest tasks and site completions to Web Tracker on save
+    PushMasterProjectToWebTracker isSilent:=True
+End Sub

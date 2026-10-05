@@ -13,6 +13,7 @@ import {
   Briefcase,
   Lock,
   Key,
+  Upload,
 } from 'lucide-react';
 import { UserRole } from '@/lib/types';
 
@@ -30,6 +31,7 @@ interface HeaderProps {
   userName?: string;
   isOffline: boolean;
   onOpenSync: () => void;
+  onQuickSync?: () => void;
   isAutoSyncing?: boolean;
   onToggleSearch?: () => void;
   isSearchOpen?: boolean;
@@ -55,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
   userName,
   isOffline,
   onOpenSync,
+  onQuickSync,
   isAutoSyncing = false,
   onToggleSearch,
   isSearchOpen = false,
@@ -156,19 +159,31 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Sync MS Project Button (Admin and Staff only) */}
             {role !== 'contractor' && (
-              <button
-                onClick={onOpenSync}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-                  isAutoSyncing
-                    ? 'bg-accent-light/20 text-accent-light dark:bg-accent-dark/30 dark:text-accent-dark border-accent-light/40 dark:border-accent-dark/50'
-                    : 'bg-accent-light/10 text-accent-light dark:bg-accent-dark/20 dark:text-accent-dark hover:bg-accent-light/20 border-accent-light/20 dark:border-accent-dark/30'
-                }`}
-                title={isAutoSyncing ? 'Syncing latest MS Project from OneDrive...' : 'Two-Way MS Project Sync'}
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{isAutoSyncing ? 'Syncing...' : 'Sync MS Project'}</span>
-                <span className="sm:hidden">{isAutoSyncing ? 'Syncing...' : 'Sync'}</span>
-              </button>
+              <div className="inline-flex items-center rounded-full border border-accent-light/30 dark:border-accent-dark/40 bg-accent-light/10 dark:bg-accent-dark/20 p-0.5">
+                <button
+                  type="button"
+                  onClick={onQuickSync || onOpenSync}
+                  disabled={isAutoSyncing}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                    isAutoSyncing
+                      ? 'text-accent-light dark:text-accent-dark cursor-wait'
+                      : 'text-accent-light dark:text-accent-dark hover:bg-accent-light/20 dark:hover:bg-accent-dark/30'
+                  }`}
+                  title={isAutoSyncing ? 'Syncing latest MS Project from OneDrive...' : '1-Click Sync latest MS Project from OneDrive'}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isAutoSyncing ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{isAutoSyncing ? 'Syncing...' : 'Sync MS Project'}</span>
+                  <span className="sm:hidden">{isAutoSyncing ? 'Syncing...' : 'Sync'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenSync}
+                  className="px-1.5 py-0.5 text-accent-light/70 dark:text-accent-dark/70 hover:text-accent-light dark:hover:text-accent-dark transition-colors"
+                  title="Upload XML file or view sync details"
+                >
+                  <Upload className="w-3 h-3" />
+                </button>
+              </div>
             )}
 
             {/* Lock / Sign Out Button */}

@@ -463,11 +463,16 @@ export function TrackerClient({
   const handleUnlock = async (task: TaskNode) => {
     if (role !== 'owner') return;
     try {
-      await supabase.rpc('save_tree_progress', {
+      const { error } = await supabase.rpc('save_tree_progress', {
         changes: [{ kind: 'unlock', task_id: task.id }],
       });
-      refreshData();
-    } catch (e) {
+      if (error) {
+        console.error('Unlock error:', error);
+        alert(`Failed to unlock stage: ${error.message}`);
+        return;
+      }
+      await refreshData();
+    } catch (e: any) {
       console.error('Unlock error:', e);
     }
   };
@@ -479,20 +484,33 @@ export function TrackerClient({
   const handleSave = async () => {
     setIsSaving(true);
 
+    const taskMap = new Map(dbTasks.map((t) => [t.id, t.project_id]));
     const changes = Object.entries(pendingTicks).map(([taskId, val]) => ({
       kind: 'tick',
       task_id: taskId,
-      project_id: 'master',
+      project_id: taskMap.get(taskId) || 'avi-line-4---e-i-site-installation',
       done_by_name: val.doneByName,
       ticked_at: val.tickedAt,
     }));
 
     try {
-      await supabase.rpc('save_tree_progress', { changes });
+      const { error } = await supabase.rpc('save_tree_progress', { changes });
+      if (error) {
+        console.error('RPC save failed:', error);
+        alert(`Failed to save progress: ${error.message || 'Database error'}`);
+        return;
+      }
+
+      const count = Object.keys(pendingTicks).length;
       updatePending({});
       await refreshData();
-    } catch (err) {
-      console.warn('RPC save failed:', err);
+      setAutoSyncMessage(`Successfully saved and locked ${count} ${count === 1 ? 'stage' : 'stages'}`);
+      setTimeout(() => {
+        setAutoSyncMessage(null);
+      }, 4000);
+    } catch (err: any) {
+      console.error('RPC save exception:', err);
+      alert(`Save failed: ${err.message || 'Network error'}`);
     } finally {
       setIsSaving(false);
     }

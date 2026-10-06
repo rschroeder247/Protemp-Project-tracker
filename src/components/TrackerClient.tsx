@@ -187,6 +187,8 @@ export function TrackerClient({
   const [selectedSubprojectId, setSelectedSubprojectId] = useState<string>('all');
   // Tier 2: First Heading ID ('all' or specific level-2 heading id)
   const [selectedHeadingId, setSelectedHeadingId] = useState<string>('all');
+  // Tier 3: Panel / Instrument / Unit ID ('all' or specific id)
+  const [selectedTier3Id, setSelectedTier3Id] = useState<string>('all');
 
   const [pendingTicks, setPendingTicks] = useState<
     Record<string, { doneByName: string; tickedAt: string }>
@@ -425,10 +427,26 @@ export function TrackerClient({
     return allTasks;
   }, [allTasks]);
 
-  // Default to the first subproject if available and currently on 'all'
+  // Default to the first subproject on initial load so Tier 2 shows immediate tabs
+  const hasInitializedSubproject = useRef(false);
   useEffect(() => {
-    if (visibleTasks.length === 1 && selectedSubprojectId === 'all') {
+    if (visibleTasks.length > 0 && !hasInitializedSubproject.current) {
+      hasInitializedSubproject.current = true;
       setSelectedSubprojectId(visibleTasks[0].id);
+      setSelectedHeadingId('all');
+      setSelectedTier3Id('all');
+    }
+  }, [visibleTasks]);
+
+  // Ensure selected subproject remains valid if contractor permissions change
+  useEffect(() => {
+    if (visibleTasks.length > 0 && selectedSubprojectId !== 'all') {
+      const isStillVisible = visibleTasks.some((sp) => sp.id === selectedSubprojectId);
+      if (!isStillVisible) {
+        setSelectedSubprojectId(visibleTasks[0].id);
+        setSelectedHeadingId('all');
+        setSelectedTier3Id('all');
+      }
     }
   }, [visibleTasks, selectedSubprojectId]);
 
@@ -449,10 +467,11 @@ export function TrackerClient({
         const shortName = sp.name
           .replace(/\(Quote.*?\)/i, '')
           .replace(/\(Motor.*?\)/i, '')
+          .replace(/_/g, ' ')
           .trim();
         return {
           id: sp.id,
-          label: shortName.length > 25 ? shortName.substring(0, 23) + '...' : shortName,
+          label: shortName.length > 30 ? shortName.substring(0, 28) + '...' : shortName,
           pct: Math.round(stats.taskPct),
           count: sp.children ? sp.children.length : 1,
         };
@@ -467,37 +486,43 @@ export function TrackerClient({
     return visibleTasks.find((sp) => sp.id === selectedSubprojectId) || null;
   }, [visibleTasks, selectedSubprojectId]);
 
-  // TIER 2: First Headings under Active Subproject
-  const tier2Headings: NavItem[] = useMemo(() => {
-    let headingsSource: TaskNode[] = activeSubprojectNode
-      ? activeSubprojectNode.children || []
-      : visibleTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
-
-    // If the active subproject has a single wrapper summary child, unwrap it to reveal its direct sections
-    if (
-      activeSubprojectNode &&
-      headingsSource.length === 1 &&
-      headingsSource[0].children &&
-      headingsSource[0].children.length > 0
-    ) {
-      headingsSource = headingsSource[0].children;
+  // Extract direct sections under active subproject (unwrapping single wrapper summary nodes if present)
+  const tier2RawNodes = useMemo(() => {
+    if (!activeSubprojectNode || !activeSubprojectNode.children || activeSubprojectNode.children.length === 0) {
+      return [];
     }
 
-    if (headingsSource.length === 0) return [];
+    let currentChildren = activeSubprojectNode.children;
+    while (
+      currentChildren.length === 1 &&
+      currentChildren[0].children &&
+      currentChildren[0].children.length > 0 &&
+      currentChildren[0].isSummary
+    ) {
+      currentChildren = currentChildren[0].children;
+    }
+    return currentChildren;
+  }, [activeSubprojectNode]);
+
+  // TIER 2: Headings strictly under Active Subproject (Hidden when 'Overview All' is selected)
+  const tier2Headings: NavItem[] = useMemo(() => {
+    if (selectedSubprojectId === 'all' || tier2RawNodes.length === 0) {
+      return [];
+    }
 
     const currentScopeStats = calculateTreeStats(
-      activeSubprojectNode ? [activeSubprojectNode] : visibleTasks,
+      activeSubprojectNode ? [activeSubprojectNode] : [],
       pendingTicks
     );
 
     const items: NavItem[] = [
       {
         id: 'all',
-        label: 'All Headings',
+        label: 'All Sections',
         pct: Math.round(currentScopeStats.taskPct),
-        count: headingsSource.length,
+        count: tier2RawNodes.length,
       },
-      ...headingsSource.map((h) => {
+      ...tier2RawNodes.map((h) => {
         const stats = calculateTreeStats([h], pendingTicks);
         const cleanName = h.name
           .replace(/\(Quote.*?\)/i, '')
@@ -513,41 +538,112 @@ export function TrackerClient({
     ];
 
     return items;
-  }, [visibleTasks, activeSubprojectNode, pendingTicks]);
+  }, [selectedSubprojectId, activeSubprojectNode, tier2RawNodes, pendingTicks]);
 
-  // TIER 3: The Last Headings / Actionable Items
-  const displayedNodes: TaskNode[] = useMemo(() => {
-    let headingsSource: TaskNode[] = activeSubprojectNode
-      ? activeSubprojectNode.children || []
-      : visibleTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+  // Active Tier 2 Heading Node
+  const activeHeadingNode = useMemo(() => {
+    if (selectedHeadingId === 'all') return null;
+    return tier2RawNodes.find((h) => h.id === selectedHeadingId) || null;
+  }, [tier2RawNodes, selectedHeadingId]);
 
-    // If the active subproject has a single wrapper summary child, unwrap it
+  // Extract direct items under active Tier 2 heading (e.g. panels, instruments)
+  const tier3RawNodes = useMemo(() => {
     if (
-      activeSubprojectNode &&
-      headingsSource.length === 1 &&
-      headingsSource[0].children &&
-      headingsSource[0].children.length > 0
+      !activeHeadingNode ||
+      !activeHeadingNode.children ||
+      activeHeadingNode.children.length === 0
     ) {
-      headingsSource = headingsSource[0].children;
+      return [];
+    }
+    // Only display Tier 3 tabs if children are summary nodes or have sub-tasks (panels, instruments)
+    const hasSubGroups = activeHeadingNode.children.some(
+      (c) => c.isSummary || (c.children && c.children.length > 0)
+    );
+    if (!hasSubGroups) {
+      return [];
+    }
+    return activeHeadingNode.children;
+  }, [activeHeadingNode]);
+
+  // TIER 3: Panels / Instruments / Units under Active Heading
+  const tier3Items: NavItem[] = useMemo(() => {
+    if (tier3RawNodes.length === 0 || !activeHeadingNode) return [];
+
+    const headingStats = calculateTreeStats([activeHeadingNode], pendingTicks);
+    const cleanHeadingName = activeHeadingNode.name
+      .replace(/\(Quote.*?\)/i, '')
+      .replace(/\(Motor.*?\)/i, '')
+      .trim();
+
+    const items: NavItem[] = [
+      {
+        id: 'all',
+        label: `All ${cleanHeadingName.length > 14 ? 'Items' : cleanHeadingName}`,
+        pct: Math.round(headingStats.taskPct),
+        count: tier3RawNodes.length,
+      },
+      ...tier3RawNodes.map((item) => {
+        const stats = calculateTreeStats([item], pendingTicks);
+        const cleanName = item.name
+          .replace(/\(.*?\)/g, '')
+          .trim();
+        return {
+          id: item.id,
+          label: cleanName.length > 25 ? cleanName.substring(0, 23) + '...' : cleanName,
+          pct: Math.round(stats.taskPct),
+          count: item.children ? item.children.length : 0,
+        };
+      }),
+    ];
+
+    return items;
+  }, [tier3RawNodes, activeHeadingNode, pendingTicks]);
+
+  // Active Tier 3 Panel / Instrument Node
+  const activeTier3Node = useMemo(() => {
+    if (selectedTier3Id === 'all') return null;
+    return tier3RawNodes.find((t3) => t3.id === selectedTier3Id) || null;
+  }, [tier3RawNodes, selectedTier3Id]);
+
+  // Displayed nodes based on current Tier 1 / Tier 2 / Tier 3 depth
+  const displayedNodes: TaskNode[] = useMemo(() => {
+    // Level 3: Specific panel / instrument selected
+    if (selectedTier3Id !== 'all' && activeTier3Node) {
+      return [activeTier3Node];
     }
 
-    if (selectedHeadingId === 'all') {
-      return headingsSource.length > 0
-        ? headingsSource
-        : (activeSubprojectNode ? [activeSubprojectNode] : visibleTasks);
+    // Level 2: Specific section selected
+    if (selectedHeadingId !== 'all' && activeHeadingNode) {
+      if (activeHeadingNode.children && activeHeadingNode.children.length > 0) {
+        return activeHeadingNode.children;
+      }
+      return [activeHeadingNode];
     }
 
-    const matchedHeading = headingsSource.find((h) => h.id === selectedHeadingId);
-    if (!matchedHeading) return headingsSource;
-
-    // Show the last headings / items under this heading
-    if (matchedHeading.children && matchedHeading.children.length > 0) {
-      return matchedHeading.children;
+    // Level 1: Specific subproject selected
+    if (selectedSubprojectId !== 'all' && activeSubprojectNode) {
+      return tier2RawNodes.length > 0 ? tier2RawNodes : [activeSubprojectNode];
     }
 
-    // Direct leaf task (milestones, single tasks)
-    return [matchedHeading];
-  }, [visibleTasks, activeSubprojectNode, selectedHeadingId]);
+    // Overview (All)
+    return visibleTasks;
+  }, [
+    selectedTier3Id,
+    activeTier3Node,
+    selectedHeadingId,
+    activeHeadingNode,
+    selectedSubprojectId,
+    activeSubprojectNode,
+    tier2RawNodes,
+    visibleTasks,
+  ]);
+
+  // Automatically expand summary nodes when navigating between tiers
+  useEffect(() => {
+    if (displayedNodes.length > 0) {
+      setExpandedIds(getAllSummaryIds(displayedNodes));
+    }
+  }, [selectedSubprojectId, selectedHeadingId, selectedTier3Id]);
 
   // Calculate summary IDs for current displayed nodes
   const currentSummaryIds = useMemo(() => {
@@ -582,11 +678,16 @@ export function TrackerClient({
 
   // Global search count across all tasks
   const globalMatchCount = useMemo(() => {
-    if ((selectedSubprojectId === 'all' && selectedHeadingId === 'all') || !searchQuery.trim()) {
+    if (
+      (selectedSubprojectId === 'all' &&
+        selectedHeadingId === 'all' &&
+        selectedTier3Id === 'all') ||
+      !searchQuery.trim()
+    ) {
       return 0;
     }
     return filterTreeByQuery(allTasks, searchQuery).matchCount;
-  }, [allTasks, searchQuery, selectedSubprojectId, selectedHeadingId]);
+  }, [allTasks, searchQuery, selectedSubprojectId, selectedHeadingId, selectedTier3Id]);
 
   // Visible summary IDs for expand/minimize
   const visibleSummaryIds = useMemo(() => {
@@ -786,13 +887,18 @@ export function TrackerClient({
         onSelectSubproject={(spId) => {
           setSelectedSubprojectId(spId);
           setSelectedHeadingId('all');
+          setSelectedTier3Id('all');
         }}
         headings={tier2Headings}
         activeHeadingId={selectedHeadingId}
         onSelectHeading={(hId) => {
           setSelectedHeadingId(hId);
-          // Expand newly selected tier 3 items
-          setExpandedIds((prev) => new Set([...prev, ...getAllSummaryIds(displayedNodes)]));
+          setSelectedTier3Id('all');
+        }}
+        tier3Items={tier3Items}
+        activeTier3Id={selectedTier3Id}
+        onSelectTier3={(t3Id) => {
+          setSelectedTier3Id(t3Id);
         }}
       />
 
@@ -946,6 +1052,7 @@ export function TrackerClient({
                         onClick={() => {
                           setSelectedSubprojectId('all');
                           setSelectedHeadingId('all');
+                          setSelectedTier3Id('all');
                         }}
                         className="text-accent-light dark:text-accent-dark font-medium underline ml-1 hover:opacity-80"
                       >
@@ -965,11 +1072,11 @@ export function TrackerClient({
             )}
           </div>
 
-          {/* Tier 3 Breadcrumb Header */}
+          {/* 3-Tier Breadcrumb Header */}
           <div className="flex items-center justify-between mb-2.5 px-1 flex-wrap gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-muted-light dark:text-muted-dark">
+            <div className="flex items-center gap-1.5 text-xs text-muted-light dark:text-muted-dark flex-wrap">
               <span className="font-semibold text-fg-light dark:text-fg-dark">
-                {activeSubprojectNode ? activeSubprojectNode.name : 'All Subprojects'}
+                {activeSubprojectNode ? activeSubprojectNode.name.replace(/_/g, ' ') : 'All Subprojects'}
               </span>
               {selectedHeadingId !== 'all' && (
                 <>
@@ -977,23 +1084,39 @@ export function TrackerClient({
                   <span className="font-semibold text-accent-light dark:text-accent-dark">
                     {tier2Headings.find((h) => h.id === selectedHeadingId)?.label}
                   </span>
-                  <span className="text-[11px] text-muted-light dark:text-muted-dark">
-                    ({hideCompleted ? `${completionFilteredNodes.length} pending` : `${displayedNodes.length} ${displayedNodes.length === 1 ? 'item' : 'items'}`})
+                </>
+              )}
+              {selectedTier3Id !== 'all' && activeTier3Node && (
+                <>
+                  <span className="text-slate-400 dark:text-slate-600">&rsaquo;</span>
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">
+                    {activeTier3Node.name.replace(/\(.*?\)/g, '').trim()}
                   </span>
                 </>
               )}
+              <span className="text-[11px] text-muted-light dark:text-muted-dark ml-1">
+                ({hideCompleted ? `${completionFilteredNodes.length} pending` : `${displayedNodes.length} ${displayedNodes.length === 1 ? 'item' : 'items'}`})
+              </span>
             </div>
 
             <div className="flex items-center gap-3">
-              {selectedHeadingId !== 'all' && (
+              {selectedTier3Id !== 'all' ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTier3Id('all')}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                >
+                  &larr; View all in {tier2Headings.find((h) => h.id === selectedHeadingId)?.label || 'section'}
+                </button>
+              ) : selectedHeadingId !== 'all' ? (
                 <button
                   type="button"
                   onClick={() => setSelectedHeadingId('all')}
                   className="text-xs text-accent-light dark:text-accent-dark hover:underline font-medium"
                 >
-                  &larr; View all headings
+                  &larr; View all sections
                 </button>
-              )}
+              ) : null}
               <div className="text-xs text-muted-light dark:text-muted-dark">
                 Role: <span className="font-semibold uppercase text-accent-light dark:text-accent-dark">{role}</span>
               </div>

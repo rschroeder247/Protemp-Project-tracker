@@ -14,6 +14,7 @@ import {
   Lock,
   Key,
   Upload,
+  Box,
 } from 'lucide-react';
 import { UserRole } from '@/lib/types';
 
@@ -49,6 +50,11 @@ interface HeaderProps {
   headings: NavItem[];
   activeHeadingId: string;
   onSelectHeading: (id: string) => void;
+
+  // Tier 3: Panels / Units / Instruments (Up to 3 tiers)
+  tier3Items?: NavItem[];
+  activeTier3Id?: string;
+  onSelectTier3?: (id: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -72,6 +78,9 @@ export const Header: React.FC<HeaderProps> = ({
   headings,
   activeHeadingId,
   onSelectHeading,
+  tier3Items,
+  activeTier3Id,
+  onSelectTier3,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-surface-light dark:bg-surface-dark border-b border-line-light dark:border-line-dark shadow-sm">
@@ -279,6 +288,45 @@ export const Header: React.FC<HeaderProps> = ({
                       }`}
                     >
                       {h.pct}%
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Tier 3: Sub-sections / Panels / Units (Under Active Tier 2 Section) */}
+        {tier3Items && tier3Items.length > 0 && onSelectTier3 && (
+          <div className="pt-1.5 border-t border-line-light/50 dark:border-line-dark/50">
+            <div className="flex items-center gap-1 mb-1">
+              <Box className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+              <span className="text-[10px] uppercase font-bold tracking-wider text-muted-light dark:text-muted-dark">
+                Tier 3 &middot; Panels & Units
+              </span>
+            </div>
+            <div className="flex space-x-1.5 overflow-x-auto no-scrollbar pb-0.5">
+              {tier3Items.map((item) => {
+                const isActive = activeTier3Id === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onSelectTier3(item.id)}
+                    className={`flex-shrink-0 px-2 py-0.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                      isActive
+                        ? 'bg-blue-600 text-white dark:bg-blue-500 dark:text-white shadow-xs'
+                        : 'bg-blue-50/70 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-900 dark:text-blue-200 border border-blue-200/60 dark:border-blue-800/60'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span
+                      className={`text-[10px] px-1 rounded-full ${
+                        isActive
+                          ? 'bg-white/20 text-white dark:bg-white/20'
+                          : 'bg-blue-100 dark:bg-blue-900/70 text-blue-700 dark:text-blue-200'
+                      }`}
+                    >
+                      {item.pct}%
                     </span>
                   </button>
                 );

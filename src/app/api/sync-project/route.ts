@@ -54,6 +54,24 @@ export async function POST(req: NextRequest) {
       tasks
     );
 
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      await supabase.from('tracker_app_settings').upsert({
+        key: 'onedrive_sync_metadata',
+        value: {
+          fileName: 'Master Project.xml',
+          eTag: 'direct_push',
+          lastModifiedDateTime: new Date().toISOString(),
+          taskCount: result.count,
+          lastSyncedAt: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      });
+    } catch {
+      // non-critical
+    }
+
     return NextResponse.json({
       success: true,
       projectName,

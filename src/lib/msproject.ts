@@ -67,15 +67,21 @@ export async function syncProjectTreeToSupabase(
     };
   });
 
-  // 3. Batch upsert in chunks (1000 rows max per Supabase PostgREST recommendation)
+  // 3. Batch upsert in parallel chunks
   const CHUNK_SIZE = 1000;
+  const chunks: (typeof rows)[] = [];
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-    const chunk = rows.slice(i, i + CHUNK_SIZE);
-    const { error } = await supabase.from('tracker_tasks').upsert(chunk);
-    if (error) {
-      throw new Error(`Failed to upsert tasks chunk ${i}: ${error.message}`);
-    }
+    chunks.push(rows.slice(i, i + CHUNK_SIZE));
   }
+
+  await Promise.all(
+    chunks.map(async (chunk, idx) => {
+      const { error } = await supabase.from('tracker_tasks').upsert(chunk);
+      if (error) {
+        throw new Error(`Failed to upsert tasks chunk ${idx}: ${error.message}`);
+      }
+    })
+  );
 
   // 3b. Automatically prune deleted/obsolete tasks that no longer exist in MS Project
   // Only prune for subprojects that actually had their full child tree exported (> 1 tasks)
@@ -92,15 +98,28 @@ export async function syncProjectTreeToSupabase(
   const activeTaskIdSet = new Set(rows.map((r) => r.id));
 
   if (fullyExportedProjectIds.length > 0) {
-    const { data: existingDbTasks } = await supabase
+    // Fast check: only search for obsolete tasks if DB count exceeds incoming active task count
+    const { count: totalDbCount } = await supabase
       .from('tracker_tasks')
-      .select('id')
+      .select('id', { count: 'exact', head: true })
       .in('project_id', fullyExportedProjectIds);
 
-    if (existingDbTasks && existingDbTasks.length > 0) {
-      const toDeleteIds = existingDbTasks
-        .map((t) => t.id)
-        .filter((id) => !activeTaskIdSet.has(id));
+    if (totalDbCount && totalDbCount > rows.length) {
+      const existingIds: string[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('tracker_tasks')
+          .select('id')
+          .in('project_id', fullyExportedProjectIds)
+          .range(from, from + 999);
+        if (error || !data || data.length === 0) break;
+        existingIds.push(...data.map((d: any) => d.id));
+        if (data.length < 1000) break;
+        from += 1000;
+      }
+
+      const toDeleteIds = existingIds.filter((id) => !activeTaskIdSet.has(id));
 
       if (toDeleteIds.length > 0) {
         // Remove any progress records first to maintain foreign key integrity
@@ -144,13 +163,18 @@ export async function syncProjectTreeToSupabase(
       };
     });
 
+    const progChunks: (typeof progressRows)[] = [];
     for (let i = 0; i < progressRows.length; i += CHUNK_SIZE) {
-      const chunk = progressRows.slice(i, i + CHUNK_SIZE);
-      const { error: progErr } = await supabase.from('tracker_task_progress').upsert(chunk);
-      if (progErr) {
-        console.warn('Notice upserting completed progress from MS Project:', progErr);
-      }
+      progChunks.push(progressRows.slice(i, i + CHUNK_SIZE));
     }
+    await Promise.all(
+      progChunks.map(async (pChunk) => {
+        const { error: progErr } = await supabase.from('tracker_task_progress').upsert(pChunk);
+        if (progErr) {
+          console.warn('Notice upserting completed progress from MS Project:', progErr);
+        }
+      })
+    );
   }
 
   return { success: true, count: rows.length };

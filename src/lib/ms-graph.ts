@@ -115,20 +115,29 @@ async function searchDriveForFile(
   return null;
 }
 
-/**
- * Searches across all OneDrive drives, SharePoint sites, and user personal drives
- * for the specified file name and returns its text content (e.g. Master Project.xml).
- */
-export async function downloadFileFromOneDrive(
-  fileName: string = 'Master Project.xml'
-): Promise<{ fileName: string; content: string; webUrl?: string; lastModifiedDateTime?: string }> {
-  const token = await getGraphAccessToken();
+export interface OneDriveFileMetadata {
+  id: string;
+  driveId: string;
+  name: string;
+  size: number;
+  eTag: string;
+  lastModifiedDateTime: string;
+  webUrl?: string;
+}
 
-  // 0. Fast-path: Check direct known SharePoint path first (< 1s)
-  const knownDriveId = 'b!aJuWp9LDrU21DuedJYC4tY_NzGRevhlNm5XuWgvDqs1wyQwrTeW9RLE212NNjDCH';
+const KNOWN_DRIVE_ID = 'b!aJuWp9LDrU21DuedJYC4tY_NzGRevhlNm5XuWgvDqs1wyQwrTeW9RLE212NNjDCH';
+
+/**
+ * Fast-path check (~200ms) to fetch OneDrive file metadata (size, lastModifiedDateTime, eTag)
+ * without downloading the full XML payload.
+ */
+export async function getOneDriveFileMetadata(
+  fileName: string = 'Master Project.xml'
+): Promise<OneDriveFileMetadata | null> {
+  const token = await getGraphAccessToken();
   try {
     const metaRes = await fetch(
-      `https://graph.microsoft.com/v1.0/drives/${knownDriveId}/root:/Protemp%20Operations/MS%20Project/${encodeURIComponent(
+      `https://graph.microsoft.com/v1.0/drives/${KNOWN_DRIVE_ID}/root:/Protemp%20Operations/MS%20Project/${encodeURIComponent(
         fileName
       )}`,
       {
@@ -138,22 +147,64 @@ export async function downloadFileFromOneDrive(
     );
     if (metaRes.ok) {
       const meta = await metaRes.json();
-      const contentRes = await fetch(
-        `https://graph.microsoft.com/v1.0/drives/${knownDriveId}/items/${meta.id}/content`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-        }
-      );
-      if (contentRes.ok) {
-        const content = await contentRes.text();
-        return {
-          fileName: meta.name,
-          content,
-          webUrl: meta.webUrl,
-          lastModifiedDateTime: meta.lastModifiedDateTime,
-        };
-      }
+      return {
+        id: meta.id,
+        driveId: KNOWN_DRIVE_ID,
+        name: meta.name,
+        size: meta.size || 0,
+        eTag: meta.eTag || '',
+        lastModifiedDateTime: meta.lastModifiedDateTime,
+        webUrl: meta.webUrl,
+      };
+    }
+  } catch (e) {
+    // proceed to fallback
+  }
+  return null;
+}
+
+/**
+ * Direct file content downloader by driveId and itemId
+ */
+export async function downloadFileContentByItem(
+  driveId: string,
+  itemId: string
+): Promise<string> {
+  const token = await getGraphAccessToken();
+  const contentRes = await fetch(
+    `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${itemId}/content`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    }
+  );
+  if (!contentRes.ok) {
+    throw new Error(`Failed to download file content: ${contentRes.statusText}`);
+  }
+  return await contentRes.text();
+}
+
+/**
+ * Searches across all OneDrive drives, SharePoint sites, and user personal drives
+ * for the specified file name and returns its text content (e.g. Master Project.xml).
+ */
+export async function downloadFileFromOneDrive(
+  fileName: string = 'Master Project.xml'
+): Promise<{ fileName: string; content: string; webUrl?: string; lastModifiedDateTime?: string; eTag?: string }> {
+  const token = await getGraphAccessToken();
+
+  // 0. Fast-path: Check direct known SharePoint path first (< 1s)
+  try {
+    const meta = await getOneDriveFileMetadata(fileName);
+    if (meta) {
+      const content = await downloadFileContentByItem(meta.driveId, meta.id);
+      return {
+        fileName: meta.name,
+        content,
+        webUrl: meta.webUrl,
+        lastModifiedDateTime: meta.lastModifiedDateTime,
+        eTag: meta.eTag,
+      };
     }
   } catch (e) {
     // Fall back to exhaustive search

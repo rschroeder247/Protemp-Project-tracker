@@ -286,20 +286,20 @@ export function TrackerClient({
             setLastSyncedLabel(nowStr);
           }
 
-          await refreshData();
-
-          if (isManual) {
-            setAutoSyncMessage(`Updated ${data.taskCount} tasks from MS Project ${timeLabel}. Refreshing view...`);
+          if (data.unchanged) {
+            setAutoSyncMessage(`MS Project is up to date ${timeLabel}`);
             setTimeout(() => {
-              window.location.reload();
-            }, 700);
+              setAutoSyncMessage(null);
+            }, 3500);
             return;
           }
+
+          await refreshData();
 
           setAutoSyncMessage(`Updated ${data.taskCount} tasks from MS Project ${timeLabel}`);
           setTimeout(() => {
             setAutoSyncMessage(null);
-          }, 7000);
+          }, 4500);
         }
       } catch (err: any) {
         console.warn('Sync notice:', err.message);

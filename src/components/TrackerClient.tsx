@@ -16,7 +16,7 @@ import {
   filterTreeByQuery,
   filterTreeByCompletion,
 } from '@/lib/calc';
-import { supabase } from '@/lib/supabase';
+import { supabase, fetchAllTasks } from '@/lib/supabase';
 import {
   Search,
   X,
@@ -229,17 +229,13 @@ export function TrackerClient({
   // Reload data from Supabase
   const refreshData = useCallback(async () => {
     try {
-      const { data: tData, error: tErr } = await supabase
-        .from('tracker_tasks')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .limit(3000);
+      const tData = await fetchAllTasks(supabase);
 
       const { data: pData, error: pErr } = await supabase
         .from('tracker_task_progress')
-        .select('*');
+        .select('*')
+        .limit(5000);
 
-      if (tErr) console.warn('Refresh tasks notice:', tErr);
       if (pErr) console.warn('Refresh progress notice:', pErr);
 
       if (tData && tData.length > 0) setDbTasks([...tData]);
@@ -473,9 +469,19 @@ export function TrackerClient({
 
   // TIER 2: First Headings under Active Subproject
   const tier2Headings: NavItem[] = useMemo(() => {
-    const headingsSource: TaskNode[] = activeSubprojectNode
+    let headingsSource: TaskNode[] = activeSubprojectNode
       ? activeSubprojectNode.children || []
       : visibleTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+
+    // If the active subproject has a single wrapper summary child, unwrap it to reveal its direct sections
+    if (
+      activeSubprojectNode &&
+      headingsSource.length === 1 &&
+      headingsSource[0].children &&
+      headingsSource[0].children.length > 0
+    ) {
+      headingsSource = headingsSource[0].children;
+    }
 
     if (headingsSource.length === 0) return [];
 
@@ -511,9 +517,19 @@ export function TrackerClient({
 
   // TIER 3: The Last Headings / Actionable Items
   const displayedNodes: TaskNode[] = useMemo(() => {
-    const headingsSource: TaskNode[] = activeSubprojectNode
+    let headingsSource: TaskNode[] = activeSubprojectNode
       ? activeSubprojectNode.children || []
       : visibleTasks.flatMap((sp) => (sp.children && sp.children.length > 0 ? sp.children : [sp]));
+
+    // If the active subproject has a single wrapper summary child, unwrap it
+    if (
+      activeSubprojectNode &&
+      headingsSource.length === 1 &&
+      headingsSource[0].children &&
+      headingsSource[0].children.length > 0
+    ) {
+      headingsSource = headingsSource[0].children;
+    }
 
     if (selectedHeadingId === 'all') {
       return headingsSource.length > 0

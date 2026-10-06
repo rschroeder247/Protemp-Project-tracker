@@ -1,5 +1,5 @@
 import { TrackerClient } from '@/components/TrackerClient';
-import { supabase } from '@/lib/supabase';
+import { supabase, fetchAllTasks } from '@/lib/supabase';
 
 export const revalidate = 0; // Fresh on every request
 
@@ -8,15 +8,12 @@ export default async function Page() {
   let initialDbProgress: any[] = [];
 
   try {
-    const { data: tasks } = await supabase
-      .from('tracker_tasks')
-      .select('*')
-      .order('sort_order', { ascending: true })
-      .limit(3000);
+    const tasks = await fetchAllTasks();
 
     const { data: progress } = await supabase
       .from('tracker_task_progress')
-      .select('*');
+      .select('*')
+      .limit(5000);
 
     if (tasks) initialDbTasks = tasks;
     if (progress) initialDbProgress = progress || [];

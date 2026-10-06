@@ -78,31 +78,43 @@ export async function syncProjectTreeToSupabase(
   }
 
   // 3b. Automatically prune deleted/obsolete tasks that no longer exist in MS Project
-  const syncedProjectIds = Array.from(new Set(rows.map((r) => r.project_id)));
+  // Only prune for subprojects that actually had their full child tree exported (> 1 tasks)
+  // to avoid accidentally wiping tasks if a subproject was collapsed in MS Project.
+  const projectTaskCounts = new Map<string, number>();
+  for (const r of rows) {
+    projectTaskCounts.set(r.project_id, (projectTaskCounts.get(r.project_id) || 0) + 1);
+  }
+
+  const fullyExportedProjectIds = Array.from(projectTaskCounts.entries())
+    .filter(([_, count]) => count > 1)
+    .map(([pid]) => pid);
+
   const activeTaskIdSet = new Set(rows.map((r) => r.id));
 
-  const { data: existingDbTasks } = await supabase
-    .from('tracker_tasks')
-    .select('id')
-    .in('project_id', syncedProjectIds);
+  if (fullyExportedProjectIds.length > 0) {
+    const { data: existingDbTasks } = await supabase
+      .from('tracker_tasks')
+      .select('id')
+      .in('project_id', fullyExportedProjectIds);
 
-  if (existingDbTasks && existingDbTasks.length > 0) {
-    const toDeleteIds = existingDbTasks
-      .map((t) => t.id)
-      .filter((id) => !activeTaskIdSet.has(id));
+    if (existingDbTasks && existingDbTasks.length > 0) {
+      const toDeleteIds = existingDbTasks
+        .map((t) => t.id)
+        .filter((id) => !activeTaskIdSet.has(id));
 
-    if (toDeleteIds.length > 0) {
-      // Remove any progress records first to maintain foreign key integrity
-      await supabase
-        .from('tracker_task_progress')
-        .delete()
-        .in('task_id', toDeleteIds);
+      if (toDeleteIds.length > 0) {
+        // Remove any progress records first to maintain foreign key integrity
+        await supabase
+          .from('tracker_task_progress')
+          .delete()
+          .in('task_id', toDeleteIds);
 
-      // Remove obsolete tasks
-      await supabase
-        .from('tracker_tasks')
-        .delete()
-        .in('id', toDeleteIds);
+        // Remove obsolete tasks
+        await supabase
+          .from('tracker_tasks')
+          .delete()
+          .in('id', toDeleteIds);
+      }
     }
   }
 

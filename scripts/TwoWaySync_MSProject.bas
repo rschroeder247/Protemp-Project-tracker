@@ -9,7 +9,11 @@ Option Explicit
 '
 ' 2. PullSiteProgressIntoMSProject()
 '    Fetches locked stages from the site team, sets % Complete to 100%,
-'    and records who did the work in MS Project.
+'    records technician name in Text1/Notes, and saves all original subprojects.
+'
+' 3. BackupXmlWithRotation()
+'    Maintains rolling 4 backups of Master Project.xml in \Backups\ folder
+'    before overwriting.
 ' =========================================================================
 
 Private Const API_BASE_URL As String = "https://protemp-project-tracker.vercel.app"
@@ -28,7 +32,113 @@ Public Function GetMasterXmlPath() As String
 End Function
 
 ' -------------------------------------------------------------------------
-' DIRECTION 0: Auto-Save XML when Project is Saved
+' SUBPROJECT PROPAGATION HELPER: Save all underlying original subprojects
+' -------------------------------------------------------------------------
+Public Sub SaveAllOpenSubprojects(Optional ByVal pj As Object = Nothing)
+    On Error Resume Next
+    
+    ' 1. Application-level FileSaveAll
+    Application.FileSaveAll
+    
+    ' 2. Iterate through all open projects in the MS Project application
+    Dim p As Object
+    For Each p In Application.Projects
+        If Not p Is Nothing Then
+            If Not p.ReadOnly Then
+                p.Save
+            End If
+        End If
+    Next p
+    
+    ' 3. Explicitly iterate through linked Subprojects of ActiveProject and save SourceProjects
+    Dim activeProj As Object
+    Set activeProj = IIf(pj Is Nothing, Application.ActiveProject, pj)
+    
+    If Not activeProj Is Nothing Then
+        Dim sp As Object
+        For Each sp In activeProj.Subprojects
+            If Not sp Is Nothing Then
+                If Not sp.SourceProject Is Nothing Then
+                    If Not sp.SourceProject.ReadOnly Then
+                        sp.SourceProject.Save
+                    End If
+                End If
+            End If
+        Next sp
+    End If
+End Sub
+
+' -------------------------------------------------------------------------
+' ROLLING XML BACKUP ROTATION: Keep 4 newest backups and delete older
+' -------------------------------------------------------------------------
+Public Sub BackupXmlWithRotation(ByVal xmlPath As String, Optional ByVal maxBackups As Integer = 4)
+    On Error Resume Next
+    If Dir$(xmlPath) = "" Then Exit Sub
+    
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso Is Nothing Then Exit Sub
+    
+    Dim parentFolder As String
+    parentFolder = fso.GetParentFolderName(xmlPath)
+    Dim backupFolder As String
+    backupFolder = fso.BuildPath(parentFolder, "Backups")
+    
+    If Not fso.FolderExists(backupFolder) Then
+        fso.CreateFolder backupFolder
+    End If
+    
+    ' 1. Create timestamped backup of the current XML file before overwriting
+    Dim timestamp As String
+    timestamp = Format$(Now, "yyyymmdd_hhnnss")
+    Dim backupName As String
+    backupName = "Master Project_backup_" & timestamp & ".xml"
+    Dim backupPath As String
+    backupPath = fso.BuildPath(backupFolder, backupName)
+    
+    fso.CopyFile xmlPath, backupPath, True
+    
+    ' 2. Enforce rolling retention: keep only the newest maxBackups (4) files
+    Dim oFolder As Object
+    Set oFolder = fso.GetFolder(backupFolder)
+    Dim oFile As Object
+    Dim fileCount As Long
+    fileCount = 0
+    
+    For Each oFile In oFolder.Files
+        If LCase$(fso.GetExtensionName(oFile.Name)) = "xml" And _
+           InStr(1, oFile.Name, "Master Project_backup_", vbTextCompare) > 0 Then
+            fileCount = fileCount + 1
+        End If
+    Next oFile
+    
+    While fileCount > maxBackups
+        Dim oldestFile As Object
+        Set oldestFile = Nothing
+        Dim oldestDate As Date
+        oldestDate = Now + 100
+        
+        For Each oFile In oFolder.Files
+            If LCase$(fso.GetExtensionName(oFile.Name)) = "xml" And _
+               InStr(1, oFile.Name, "Master Project_backup_", vbTextCompare) > 0 Then
+                If oFile.DateLastModified < oldestDate Then
+                    oldestDate = oFile.DateLastModified
+                    Set oldestFile = oFile
+                End If
+            End If
+        Next oFile
+        
+        If Not oldestFile Is Nothing Then
+            oldestFile.Delete True
+            fileCount = fileCount - 1
+        Else
+            Exit While
+        End If
+    Wend
+End Sub
+
+' -------------------------------------------------------------------------
+' DIRECTION 0: Auto-Save XML when Project is Saved (with rolling backup & subprojects update)
 ' -------------------------------------------------------------------------
 Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optional ByVal isSilent As Boolean = True)
     On Error GoTo EH
@@ -36,6 +146,9 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     IsExportingXml = True
     
     If Application.Projects.Count = 0 Then GoTo CleanUp
+    
+    Dim activeProj As Object
+    Set activeProj = IIf(pj Is Nothing, Application.ActiveProject, pj)
     
     Dim userProfile As String
     userProfile = Environ$("USERPROFILE")
@@ -46,7 +159,15 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     Dim xmlPath As String
     xmlPath = userProfile & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
     
-    ' Suppress overwrite dialog so saving is completely seamless
+    ' 1. Keep rolling 4 backups before overwriting existing XML
+    BackupXmlWithRotation xmlPath, 4
+    
+    ' 2. Ensure all tasks and subprojects are expanded so XML export captures full subproject trees
+    On Error Resume Next
+    activeProj.OutlineShowAllTasks
+    On Error GoTo EH
+    
+    ' 3. Suppress overwrite dialog so saving is completely seamless
     Application.DisplayAlerts = False
     
     ' Export XML format
@@ -60,13 +181,16 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
         End If
     End If
     
+    ' 4. Ensure original subprojects are also saved
+    SaveAllOpenSubprojects pj:=activeProj
+    
     ' Update status bar
     On Error Resume Next
-    Application.StatusBar = "Protemp Tracker: Auto-saved XML to " & xmlPath
+    Application.StatusBar = "Protemp Tracker: Auto-saved XML (backup preserved) to " & xmlPath
     On Error GoTo EH
     
     If Not isSilent Then
-        MsgBox "Successfully exported to XML:" & vbCrLf & xmlPath, vbInformation, "Auto-Export Complete"
+        MsgBox "Successfully exported to XML (with rolling backup):" & vbCrLf & xmlPath, vbInformation, "Auto-Export Complete"
     End If
 
 CleanUp:
@@ -95,10 +219,13 @@ Public Sub SaveMasterAndExportXml()
         Exit Sub
     End If
     
-    ' 1. Save standard MPP first
-    Application.FileSave
+    ' 1. Save standard MPP and all subprojects first
+    On Error Resume Next
+    SaveAllOpenSubprojects
+    Application.ActiveProject.Save
+    On Error GoTo EH
     
-    ' 2. Determine paths directly (no helper functions required)
+    ' 2. Determine paths directly
     Dim userProfile As String
     userProfile = Environ$("USERPROFILE")
     
@@ -108,11 +235,19 @@ Public Sub SaveMasterAndExportXml()
     Dim xmlPath As String
     xmlPath = userProfile & "\OneDrive - Protemp\Protemp Operations\MS Project\Master Project.xml"
     
-    ' 3. Export XML copy
+    ' 3. Backup existing XML (maintains rolling 4 backups)
+    BackupXmlWithRotation xmlPath, 4
+    
+    ' 4. Expand all subprojects for complete export
+    On Error Resume Next
+    Application.ActiveProject.OutlineShowAllTasks
+    On Error GoTo EH
+    
+    ' 5. Export XML copy
     Application.DisplayAlerts = False
     Application.FileSaveAs Name:=xmlPath, FormatID:="MSProject.XML"
     
-    ' 4. Ensure user remains in MPP
+    ' 6. Ensure user remains in MPP
     If LCase$(Right$(Application.ActiveProject.Name, 4)) = ".xml" Then
         Application.FileCloseEx Save:=pjDoNotSave
         If Dir(mppPath) <> "" Then
@@ -121,9 +256,13 @@ Public Sub SaveMasterAndExportXml()
     End If
     Application.DisplayAlerts = True
     
+    ' 7. Also save all subprojects
+    SaveAllOpenSubprojects
+    
     On Error Resume Next
-    Application.StatusBar = "Protemp Tracker: Saved MPP & exported XML to " & xmlPath
-    MsgBox "Saved MPP and successfully exported Master Project.xml!" & vbCrLf & vbCrLf & _
+    Application.StatusBar = "Protemp Tracker: Saved MPP, updated subprojects & exported XML to " & xmlPath
+    MsgBox "Saved Master Project, updated all original subprojects, and exported XML!" & vbCrLf & vbCrLf & _
+           "Backup saved to: Backups\ (keeping 4 newest backups)." & vbCrLf & _
            "File: " & xmlPath, vbInformation, "Protemp Tracker Sync"
     Exit Sub
 
@@ -132,8 +271,6 @@ EH:
     Application.DisplayAlerts = True
     MsgBox "Error saving and exporting XML: " & Err.Description, vbCritical
 End Sub
-
-
 
 ' -------------------------------------------------------------------------
 ' DIRECTION 1: Push MS Project tasks -> Web Tracker
@@ -168,6 +305,12 @@ Public Sub PushMasterProjectToWebTracker(Optional ByVal isSilent As Boolean = Fa
         End If
     End If
     
+    ' Also ensure original subprojects are saved
+    SaveAllOpenSubprojects pj:=pj
+    
+    ' Also ensure the local XML copy is fresh and backed up
+    AutoExportProjectToXml pj:=pj, isSilent:=True
+    
     Dim tasksCollection As Object
     Set tasksCollection = pj.ActiveProject.Tasks
     
@@ -178,9 +321,6 @@ Public Sub PushMasterProjectToWebTracker(Optional ByVal isSilent As Boolean = Fa
     
     Dim json As String
     json = "{""projectName"": """ & CleanJson(pj.ActiveProject.Name) & """, ""tasks"": ["
-    
-    ' Also ensure the local XML copy is fresh
-    AutoExportProjectToXml pj:=pj, isSilent:=True
     
     Dim t As Object
     Dim isFirst As Boolean
@@ -273,7 +413,7 @@ EH:
 End Sub
 
 ' -------------------------------------------------------------------------
-' DIRECTION 2: Pull Site Progress -> MS Project (% Complete = 100%)
+' DIRECTION 2: Pull Site Progress -> MS Project & Update Subprojects
 ' -------------------------------------------------------------------------
 Public Sub PullSiteProgressIntoMSProject(Optional ByVal isSilent As Boolean = False)
     On Error GoTo EH
@@ -295,7 +435,6 @@ Public Sub PullSiteProgressIntoMSProject(Optional ByVal isSilent As Boolean = Fa
     Dim respText As String
     respText = http.responseText
 
-    
     ' 2. Get active MS Project instance
     Dim pj As Object
     On Error Resume Next
@@ -350,20 +489,27 @@ Public Sub PullSiteProgressIntoMSProject(Optional ByVal isSilent As Boolean = Fa
         End If
     Next t
     
+    ' 4. Save Master Project AND update all original subproject files
+    On Error Resume Next
+    SaveAllOpenSubprojects pj:=pj
+    pj.Application.FileSaveAll
     pj.FileSave
+    
+    ' 5. Also export XML (with rolling 4-backup rotation)
+    AutoExportProjectToXml pj:=pj, isSilent:=True
     
     If isSilent Then
         If updatedCount > 0 Then
             MsgBox "Protemp Auto-Sync Complete!" & vbCrLf & _
-                   "Updated " & updatedCount & " task(s) to 100% complete in MS Project based on site ticks.", _
+                   "Updated " & updatedCount & " task(s) to 100% complete in Master Project & all original subprojects.", _
                    vbInformation, "Site Progress Synced"
         Else
             On Error Resume Next
-            pj.Application.StatusBar = "Protemp Tracker: Site progress is up to date."
+            pj.Application.StatusBar = "Protemp Tracker: Site progress is up to date in Master Project and subprojects."
         End If
     Else
         MsgBox "Pull Complete!" & vbCrLf & _
-               "Updated " & updatedCount & " task(s) to 100% complete in MS Project based on site ticks.", _
+               "Updated " & updatedCount & " task(s) to 100% complete in Master Project & all original subprojects.", _
                vbInformation, "Site Progress Imported"
     End If
     Exit Sub

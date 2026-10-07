@@ -115,6 +115,35 @@ export async function POST(req: NextRequest) {
         },
         updated_at: new Date().toISOString(),
       });
+
+      // 5b. Maintain rolling 4 backup history records
+      try {
+        const { data: historyRow } = await supabase
+          .from('tracker_app_settings')
+          .select('value')
+          .eq('key', 'onedrive_sync_history')
+          .maybeSingle();
+
+        const history = Array.isArray(historyRow?.value) ? historyRow.value : [];
+        const newEntry = {
+          syncedAt: new Date().toISOString(),
+          fileName,
+          taskCount: result.count,
+          subprojects: Array.from(new Set(parsed.tasks.map((t) => t.subprojectName || t.projectId))),
+          lastModifiedDateTime: meta?.lastModifiedDateTime || lastModifiedDateTime,
+          eTag: meta?.eTag || '',
+        };
+
+        const updatedHistory = [newEntry, ...history].slice(0, 4);
+
+        await supabase.from('tracker_app_settings').upsert({
+          key: 'onedrive_sync_history',
+          value: updatedHistory,
+          updated_at: new Date().toISOString(),
+        });
+      } catch {
+        // non-critical
+      }
     }
 
     return NextResponse.json({

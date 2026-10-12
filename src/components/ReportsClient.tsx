@@ -25,6 +25,9 @@ import {
   Award,
   Zap,
   Users,
+  Gauge,
+  Timer,
+  Activity,
 } from 'lucide-react';
 import { LockScreen } from '@/components/LockScreen';
 import { UserRole } from '@/lib/types';
@@ -37,7 +40,7 @@ interface ReportsClientProps {
   initialDbProjects: any[];
 }
 
-type TimeframeOption = '7d' | '30d' | 'all';
+type TimeframeOption = '1d' | '7d' | '30d' | 'all';
 type MetricOption = 'hours' | 'tasks';
 
 export function ReportsClient({
@@ -58,6 +61,7 @@ export function ReportsClient({
   const [chartMetric, setChartMetric] = useState<MetricOption>('hours');
   const [activitySearch, setActivitySearch] = useState<string>('');
   const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
+  const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [teamViewMode, setTeamViewMode] = useState<'individual' | 'crews'>('individual');
 
   // Live state
@@ -256,6 +260,145 @@ export function ReportsClient({
   // Most recent data entry
   const latestEntry = enrichedProgress.length > 0 ? enrichedProgress[0] : null;
 
+  // Detailed Scale Analysis for the Last Worked Day
+  const lastWorkedDayScale = useMemo(() => {
+    if (!latestEntry || enrichedProgress.length === 0) return null;
+    const dateStr = latestEntry.dateStr;
+    const dayItems = enrichedProgress.filter((p) => p.dateStr === dateStr);
+    const stagesCount = dayItems.length;
+    const earnedHours = Number(dayItems.reduce((sum, i) => sum + i.quotedHours, 0).toFixed(2));
+    const technicians = Array.from(new Set(dayItems.flatMap((i) => i.persons)));
+
+    // Date formatting
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    const fullDate = dateObj.toLocaleDateString([], {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+    const shortDate = dateObj.toLocaleDateString([], {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+
+    // Recency badge calculation
+    const now = new Date();
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayMidnight = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+    const diffDaysFromToday = Math.round((todayMidnight.getTime() - dayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+    const recencyBadge =
+      diffDaysFromToday === 0
+        ? 'Today'
+        : diffDaysFromToday === 1
+        ? 'Yesterday'
+        : `${diffDaysFromToday} days ago`;
+
+    // Hourly distribution ruler: 07:00 through 18:00
+    const hourlyMap = new Map<number, { hour: number; hourLabel: string; shortLabel: string; stages: number; hours: number; items: typeof dayItems }>();
+    for (let h = 7; h <= 18; h++) {
+      const hStr = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
+      const shortStr = `${h}:00`;
+      hourlyMap.set(h, { hour: h, hourLabel: hStr, shortLabel: shortStr, stages: 0, hours: 0, items: [] });
+    }
+
+    for (const item of dayItems) {
+      const h = item.tickedDate.getHours();
+      let slot = hourlyMap.get(h);
+      if (!slot) {
+        const hStr = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
+        slot = { hour: h, hourLabel: hStr, shortLabel: `${h}:00`, stages: 0, hours: 0, items: [] };
+        hourlyMap.set(h, slot);
+      }
+      slot.stages += 1;
+      slot.hours = Number((slot.hours + item.quotedHours).toFixed(2));
+      slot.items.push(item);
+    }
+
+    const hourlySlots = Array.from(hourlyMap.values()).sort((a, b) => a.hour - b.hour);
+    const maxHourStages = Math.max(1, ...hourlySlots.map((s) => s.stages));
+    const maxHourHours = Math.max(1, ...hourlySlots.map((s) => s.hours));
+    const activeHoursCount = hourlySlots.filter((s) => s.stages > 0).length;
+
+    // Person distribution on this last worked day
+    const personMap = new Map<string, { stages: number; hours: number }>();
+    for (const item of dayItems) {
+      for (const p of item.persons) {
+        const prev = personMap.get(p) || { stages: 0, hours: 0 };
+        personMap.set(p, {
+          stages: prev.stages + 1,
+          hours: Number((prev.hours + item.quotedHours).toFixed(2)),
+        });
+      }
+    }
+    const maxPersonStages = Math.max(1, ...Array.from(personMap.values()).map((p) => p.stages));
+    const personBreakdown = Array.from(personMap.entries())
+      .map(([name, stats]) => ({
+        name,
+        stages: stats.stages,
+        hours: stats.hours,
+        pct: Math.round((stats.stages / maxPersonStages) * 100),
+      }))
+      .sort((a, b) => b.stages - a.stages || b.hours - a.hours);
+
+    // Historical average daily earned hours for benchmark scale
+    const activeDayKeys = new Set(enrichedProgress.map((p) => p.dateStr));
+    const totalEarnedHistorical = enrichedProgress.reduce((sum, p) => sum + p.quotedHours, 0);
+    const avgDailyEarned = activeDayKeys.size > 0 ? totalEarnedHistorical / activeDayKeys.size : earnedHours;
+    const scaleRatio = avgDailyEarned > 0 ? earnedHours / avgDailyEarned : 1;
+    const scalePercent = Math.round(scaleRatio * 100);
+
+    let scaleTier: 'light' | 'moderate' | 'high' | 'peak' = 'moderate';
+    let scaleLabel = 'Standard Output';
+    let scaleColor = 'text-blue-600 dark:text-blue-400';
+    let scaleBg = 'bg-blue-500';
+
+    if (scalePercent >= 150) {
+      scaleTier = 'peak';
+      scaleLabel = 'Peak Output (Extraordinary Pace)';
+      scaleColor = 'text-purple-600 dark:text-purple-400';
+      scaleBg = 'bg-purple-500';
+    } else if (scalePercent >= 100) {
+      scaleTier = 'high';
+      scaleLabel = 'High Scale Activity (Above Average)';
+      scaleColor = 'text-emerald-600 dark:text-emerald-400';
+      scaleBg = 'bg-emerald-500';
+    } else if (scalePercent >= 60) {
+      scaleTier = 'moderate';
+      scaleLabel = 'Moderate Scale Output';
+      scaleColor = 'text-blue-600 dark:text-blue-400';
+      scaleBg = 'bg-blue-500';
+    } else {
+      scaleTier = 'light';
+      scaleLabel = 'Light Scale Output';
+      scaleColor = 'text-amber-600 dark:text-amber-400';
+      scaleBg = 'bg-amber-500';
+    }
+
+    return {
+      dateStr,
+      fullDate,
+      shortDate,
+      recencyBadge,
+      stagesCount,
+      earnedHours,
+      technicians,
+      hourlySlots,
+      maxHourStages,
+      maxHourHours,
+      activeHoursCount,
+      personBreakdown,
+      avgDailyEarned: Number(avgDailyEarned.toFixed(1)),
+      scalePercent,
+      scaleTier,
+      scaleLabel,
+      scaleColor,
+      scaleBg,
+      items: dayItems,
+    };
+  }, [latestEntry, enrichedProgress]);
+
   // Calendar Date Range Construction
   const { dateRangeDays, startDate, endDate, dateKeys } = useMemo(() => {
     const now = new Date();
@@ -263,7 +406,25 @@ export function ReportsClient({
     const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     let start = new Date(end);
 
-    if (timeframe === '7d') {
+    if (timeframe === '1d') {
+      if (enrichedProgress.length > 0) {
+        const lastDateStr = enrichedProgress[0].dateStr;
+        const [y, m, d] = lastDateStr.split('-').map(Number);
+        const lDate = new Date(y, m - 1, d);
+        return {
+          dateRangeDays: 1,
+          startDate: lDate,
+          endDate: lDate,
+          dateKeys: [lastDateStr],
+        };
+      }
+      return {
+        dateRangeDays: 1,
+        startDate: end,
+        endDate: end,
+        dateKeys: [end.toISOString().substring(0, 10)],
+      };
+    } else if (timeframe === '7d') {
       start.setDate(end.getDate() - 6);
     } else if (timeframe === '30d') {
       start.setDate(end.getDate() - 29);
@@ -481,13 +642,19 @@ export function ReportsClient({
 
   // Max values for chart scaling
   const maxDayValue = useMemo(() => {
+    if (timeframe === '1d' && lastWorkedDayScale) {
+      if (chartMetric === 'hours') {
+        return Math.max(1, Math.ceil(lastWorkedDayScale.maxHourHours * 1.2));
+      }
+      return Math.max(1, Math.ceil(lastWorkedDayScale.maxHourStages * 1.2));
+    }
     if (chartMetric === 'hours') {
       const maxH = Math.max(...dailyTrends.map((d) => d.earnedHours), 1);
       return Math.ceil(maxH * 1.15);
     }
     const maxT = Math.max(...dailyTrends.map((d) => d.tasksCount), 1);
     return Math.ceil(maxT * 1.15);
-  }, [dailyTrends, chartMetric]);
+  }, [dailyTrends, chartMetric, timeframe, lastWorkedDayScale]);
 
   // Loading Screen
   if (isCheckingAuth) {
@@ -631,11 +798,29 @@ export function ReportsClient({
               </div>
             </div>
 
-            {/* Timeframe Selector (1 Week / 1 Month / All Time) */}
+            {/* Timeframe Selector (Last Worked Day / 1 Week / 1 Month / All Time) */}
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg border border-line-light dark:border-line-dark text-xs">
               <button
                 type="button"
-                onClick={() => setTimeframe('7d')}
+                onClick={() => {
+                  setTimeframe('1d');
+                  setSelectedHour(null);
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                  timeframe === '1d'
+                    ? 'bg-surface-light dark:bg-surface-dark text-purple-700 dark:text-purple-300 shadow-xs font-bold'
+                    : 'text-muted-light dark:text-muted-dark hover:text-fg-light dark:hover:text-fg-dark'
+                }`}
+                title="View hourly breakdown for the most recent day of site activity"
+              >
+                Last Worked Day
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTimeframe('7d');
+                  setSelectedHour(null);
+                }}
                 className={`px-2.5 py-1 rounded-md font-medium transition-all ${
                   timeframe === '7d'
                     ? 'bg-surface-light dark:bg-surface-dark text-fg-light dark:text-fg-dark shadow-xs font-bold'
@@ -646,7 +831,10 @@ export function ReportsClient({
               </button>
               <button
                 type="button"
-                onClick={() => setTimeframe('30d')}
+                onClick={() => {
+                  setTimeframe('30d');
+                  setSelectedHour(null);
+                }}
                 className={`px-2.5 py-1 rounded-md font-medium transition-all ${
                   timeframe === '30d'
                     ? 'bg-surface-light dark:bg-surface-dark text-fg-light dark:text-fg-dark shadow-xs font-bold'
@@ -657,7 +845,10 @@ export function ReportsClient({
               </button>
               <button
                 type="button"
-                onClick={() => setTimeframe('all')}
+                onClick={() => {
+                  setTimeframe('all');
+                  setSelectedHour(null);
+                }}
                 className={`px-2.5 py-1 rounded-md font-medium transition-all ${
                   timeframe === 'all'
                     ? 'bg-surface-light dark:bg-surface-dark text-fg-light dark:text-fg-dark shadow-xs font-bold'
@@ -737,6 +928,200 @@ export function ReportsClient({
           </div>
         )}
 
+        {/* Scale of Last Worked Day Card */}
+        {lastWorkedDayScale && (
+          <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-2xl p-4 shadow-xs space-y-3.5">
+            {/* Header: Title, Date, Recency Badge & Zoom Button */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-400/20">
+                  <Gauge className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-sm font-bold text-fg-light dark:text-fg-dark">
+                      Scale of Last Worked Day
+                    </h2>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 font-semibold border border-purple-300 dark:border-purple-800">
+                      {lastWorkedDayScale.recencyBadge}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-light dark:text-muted-dark">
+                    {lastWorkedDayScale.fullDate} &bull; {lastWorkedDayScale.activeHoursCount} active shift hours
+                  </p>
+                </div>
+              </div>
+
+              {/* Action: Zoom into this day's hourly scale */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTimeframe('1d');
+                    setSelectedHour(null);
+                    const chartElem = document.getElementById('daily-trend-chart-card');
+                    if (chartElem) chartElem.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    timeframe === '1d'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border border-line-light dark:border-line-dark'
+                  }`}
+                  title="View hourly breakdown in the chart below"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>{timeframe === '1d' ? 'Hourly Scale Active' : 'View Hourly Chart Scale'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 3 Metric Pillars: Earned Hours Scale, Stages Volume, Intensity Gauge */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              {/* Pillar 1: Earned Hours */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-line-light/60 dark:border-line-dark/60">
+                <span className="text-[11px] font-medium text-muted-light dark:text-muted-dark block">
+                  Earned Workload Scale
+                </span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-bold font-mono text-fg-light dark:text-fg-dark">
+                    {lastWorkedDayScale.earnedHours}
+                  </span>
+                  <span className="text-xs text-muted-light dark:text-muted-dark">quoted hrs</span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-[10px] text-muted-light dark:text-muted-dark font-mono">
+                  <span>Daily Avg: {lastWorkedDayScale.avgDailyEarned}h</span>
+                  <span className={`font-bold ${lastWorkedDayScale.scaleColor}`}>
+                    {lastWorkedDayScale.scalePercent}% pace
+                  </span>
+                </div>
+              </div>
+
+              {/* Pillar 2: Stages Volume */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-line-light/60 dark:border-line-dark/60">
+                <span className="text-[11px] font-medium text-muted-light dark:text-muted-dark block">
+                  Completed Stages Volume
+                </span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-bold font-mono text-fg-light dark:text-fg-dark">
+                    {lastWorkedDayScale.stagesCount}
+                  </span>
+                  <span className="text-xs text-muted-light dark:text-muted-dark">stages logged</span>
+                </div>
+                <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-light dark:text-muted-dark font-mono truncate">
+                  <span>Crew:</span>
+                  <span className="font-semibold text-fg-light dark:text-fg-dark truncate">
+                    {lastWorkedDayScale.technicians.join(', ')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Pillar 3: Scale Intensity Meter */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-line-light/60 dark:border-line-dark/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-muted-light dark:text-muted-dark">
+                    Day Output Scale Meter
+                  </span>
+                  <span className={`text-[10px] font-bold ${lastWorkedDayScale.scaleColor}`}>
+                    {lastWorkedDayScale.scaleTier.toUpperCase()}
+                  </span>
+                </div>
+                {/* 4-tier segmented bar */}
+                <div className="mt-2 grid grid-cols-4 gap-1 h-2">
+                  <div className={`rounded-sm ${lastWorkedDayScale.scalePercent >= 30 ? 'bg-amber-400' : 'bg-slate-200 dark:bg-slate-800'}`} title="Light (<10h)" />
+                  <div className={`rounded-sm ${lastWorkedDayScale.scalePercent >= 60 ? 'bg-blue-400' : 'bg-slate-200 dark:bg-slate-800'}`} title="Moderate (10-20h)" />
+                  <div className={`rounded-sm ${lastWorkedDayScale.scalePercent >= 100 ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-800'}`} title="High (20-25h)" />
+                  <div className={`rounded-sm ${lastWorkedDayScale.scalePercent >= 140 ? 'bg-purple-500' : 'bg-slate-200 dark:bg-slate-800'}`} title="Peak (25h+)" />
+                </div>
+                <span className="text-[10px] text-muted-light dark:text-muted-dark mt-1 block truncate">
+                  {lastWorkedDayScale.scaleLabel}
+                </span>
+              </div>
+            </div>
+
+            {/* Shift Workday Time Scale Ruler (07:00 through 18:00) */}
+            <div className="pt-1 border-t border-line-light/50 dark:border-line-dark/50">
+              <div className="flex items-center justify-between text-[11px] font-medium text-muted-light dark:text-muted-dark mb-1.5 flex-wrap gap-1">
+                <span className="flex items-center gap-1.5">
+                  <Timer className="w-3.5 h-3.5 text-accent-light dark:text-accent-dark" />
+                  Workday Shift Time Scale (Hours of the Day)
+                </span>
+                <span className="text-[10px] font-mono text-muted-light dark:text-muted-dark">
+                  Active window: {lastWorkedDayScale.hourlySlots.find(s => s.stages > 0)?.shortLabel || '07:00'} &ndash; {lastWorkedDayScale.hourlySlots.slice().reverse().find(s => s.stages > 0)?.shortLabel || '17:00'}
+                </span>
+              </div>
+
+              {/* Time Ruler Blocks */}
+              <div className="grid grid-cols-6 sm:grid-cols-12 gap-1 bg-slate-100 dark:bg-slate-900/60 p-2 rounded-xl border border-line-light/50 dark:border-line-dark/50">
+                {lastWorkedDayScale.hourlySlots.map((slot) => {
+                  const isActive = slot.stages > 0;
+                  return (
+                    <div
+                      key={slot.hour}
+                      onClick={() => {
+                        setTimeframe('1d');
+                        setSelectedHour(slot.hour);
+                        const chartElem = document.getElementById('daily-trend-chart-card');
+                        if (chartElem) chartElem.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className={`flex flex-col items-center justify-between py-1.5 px-0.5 rounded-lg cursor-pointer transition-all text-center ${
+                        isActive
+                          ? 'bg-surface-light dark:bg-surface-dark border border-emerald-400/40 shadow-xs hover:border-emerald-500'
+                          : 'opacity-40 hover:opacity-75'
+                      }`}
+                      title={`${slot.hourLabel}: ${slot.stages} stages completed (${slot.hours} earned hrs)`}
+                    >
+                      <span className="text-[9px] font-mono text-muted-light dark:text-muted-dark">
+                        {slot.shortLabel}
+                      </span>
+                      <div className="my-1">
+                        {isActive ? (
+                          <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-800 animate-pulse" />
+                        ) : (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700" />
+                        )}
+                      </div>
+                      <span className="text-[9px] font-mono font-bold text-fg-light dark:text-fg-dark">
+                        {isActive ? `${slot.stages}` : '-'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Individual Technician Contribution Scale on this Day */}
+            <div className="pt-1 border-t border-line-light/50 dark:border-line-dark/50">
+              <span className="text-[11px] font-medium text-muted-light dark:text-muted-dark block mb-2">
+                Technician Share Scale on Last Worked Day:
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                {lastWorkedDayScale.personBreakdown.map((p) => (
+                  <div
+                    key={p.name}
+                    className="p-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-line-light/50 dark:border-line-dark/50 text-xs"
+                  >
+                    <div className="flex items-center justify-between font-semibold">
+                      <span className="text-fg-light dark:text-fg-dark truncate">{p.name}</span>
+                      <span className="font-mono text-[11px] text-accent-light dark:text-accent-dark">
+                        {p.hours}h
+                      </span>
+                    </div>
+                    <div className="mt-1 w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        style={{ width: `${Math.max(10, p.pct)}%` }}
+                        className="h-full bg-emerald-500 rounded-full"
+                      />
+                    </div>
+                    <span className="text-[10px] text-muted-light dark:text-muted-dark mt-0.5 block">
+                      {p.stages} stages logged
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Executive KPI Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {/* Card 1: Stages Completed in Period */}
@@ -809,15 +1194,19 @@ export function ReportsClient({
         </div>
 
         {/* Daily Progress Trend Chart Card */}
-        <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-2xl p-4 shadow-xs">
+        <div id="daily-trend-chart-card" className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
             <div>
               <h3 className="text-sm font-bold text-fg-light dark:text-fg-dark flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-accent-light dark:text-accent-dark" />
-                Daily Progress Trend ({timeframe === '7d' ? 'Last 7 Days' : timeframe === '30d' ? 'Last 30 Days' : 'All Time'})
+                {timeframe === '1d'
+                  ? `Hourly Scale of Last Worked Day (${lastWorkedDayScale?.shortDate || 'Recent Day'})`
+                  : `Daily Progress Trend (${timeframe === '7d' ? 'Last 7 Days' : timeframe === '30d' ? 'Last 30 Days' : 'All Time'})`}
               </h3>
               <p className="text-[11px] text-muted-light dark:text-muted-dark">
-                Click any bar to inspect daily technician breakdown and completed stages
+                {timeframe === '1d'
+                  ? 'Click any hour bar to inspect stages completed during that shift hour'
+                  : 'Click any bar to inspect daily technician breakdown and completed stages'}
               </p>
             </div>
 
@@ -848,73 +1237,206 @@ export function ReportsClient({
             </div>
           </div>
 
-          {/* Interactive SVG Bar Chart */}
+          {/* Interactive SVG / Bar Chart */}
           <div className="w-full overflow-x-auto no-scrollbar pb-2">
             <div className="min-w-[500px]">
-              {/* Chart Canvas */}
-              <div className="h-48 flex items-end gap-1.5 pt-6 pb-2 border-b border-line-light dark:border-line-dark">
-                {dailyTrends.map((d) => {
-                  const val = chartMetric === 'hours' ? d.earnedHours : d.tasksCount;
-                  const heightPct = maxDayValue > 0 ? Math.min(100, Math.max(val > 0 ? 8 : 2, (val / maxDayValue) * 100)) : 2;
-                  const isSelected = selectedDayDate === d.dateStr;
-                  const hasActivity = val > 0;
+              {timeframe === '1d' && lastWorkedDayScale ? (
+                /* 1D Hourly Scale Chart */
+                <>
+                  <div className="h-48 flex items-end gap-1.5 pt-6 pb-2 border-b border-line-light dark:border-line-dark">
+                    {lastWorkedDayScale.hourlySlots.map((slot) => {
+                      const val = chartMetric === 'hours' ? slot.hours : slot.stages;
+                      const heightPct = maxDayValue > 0 ? Math.min(100, Math.max(val > 0 ? 8 : 2, (val / maxDayValue) * 100)) : 2;
+                      const isSelected = selectedHour === slot.hour;
+                      const hasActivity = val > 0;
 
-                  return (
-                    <div
-                      key={d.dateStr}
-                      onClick={() => setSelectedDayDate(isSelected ? null : d.dateStr)}
-                      className="flex-1 flex flex-col items-center justify-end h-full group cursor-pointer relative"
-                      title={`${d.fullDate}: ${d.tasksCount} stages (${d.earnedHours} hrs)`}
-                    >
-                      {/* Value label on top of bar if active */}
-                      {hasActivity && (
-                        <span className="text-[10px] font-bold font-mono text-muted-light dark:text-muted-dark mb-1 group-hover:text-accent-light dark:group-hover:text-accent-dark transition-colors">
-                          {chartMetric === 'hours' ? `${val}h` : val}
-                        </span>
-                      )}
+                      return (
+                        <div
+                          key={slot.hour}
+                          onClick={() => setSelectedHour(isSelected ? null : slot.hour)}
+                          className="flex-1 flex flex-col items-center justify-end h-full group cursor-pointer relative"
+                          title={`${slot.hourLabel}: ${slot.stages} stages (${slot.hours} hrs)`}
+                        >
+                          {/* Value label on top of bar if active */}
+                          {hasActivity && (
+                            <span className="text-[10px] font-bold font-mono text-muted-light dark:text-muted-dark mb-1 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
+                              {chartMetric === 'hours' ? `${val}h` : val}
+                            </span>
+                          )}
 
-                      {/* Bar body */}
+                          {/* Bar body */}
+                          <div
+                            style={{ height: `${heightPct}%` }}
+                            className={`w-full max-w-[36px] rounded-t-md transition-all ${
+                              hasActivity
+                                ? isSelected
+                                  ? 'bg-purple-600 dark:bg-purple-500 ring-2 ring-purple-400 shadow-md'
+                                  : chartMetric === 'hours'
+                                  ? 'bg-blue-500 dark:bg-blue-600 group-hover:bg-blue-600 dark:group-hover:bg-blue-500'
+                                  : 'bg-emerald-500 dark:bg-emerald-600 group-hover:bg-emerald-600 dark:group-hover:bg-emerald-500'
+                                : 'bg-slate-200/50 dark:bg-slate-800/40 group-hover:bg-slate-300 dark:group-hover:bg-slate-700'
+                            }`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* X-Axis Hour Labels */}
+                  <div className="flex items-center gap-1.5 pt-1.5 text-[10px] text-muted-light dark:text-muted-dark font-mono">
+                    {lastWorkedDayScale.hourlySlots.map((slot) => (
                       <div
-                        style={{ height: `${heightPct}%` }}
-                        className={`w-full max-w-[36px] rounded-t-md transition-all ${
-                          hasActivity
-                            ? isSelected
-                              ? 'bg-accent-light dark:bg-accent-dark ring-2 ring-accent-light/50 shadow-md'
-                              : chartMetric === 'hours'
-                              ? 'bg-blue-500 dark:bg-blue-600 group-hover:bg-blue-600 dark:group-hover:bg-blue-500'
-                              : 'bg-emerald-500 dark:bg-emerald-600 group-hover:bg-emerald-600 dark:group-hover:bg-emerald-500'
-                            : 'bg-slate-200/50 dark:bg-slate-800/40 group-hover:bg-slate-300 dark:group-hover:bg-slate-700'
-                        }`}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+                        key={slot.hour}
+                        className={`flex-1 text-center truncate ${selectedHour === slot.hour ? 'font-bold text-purple-600 dark:text-purple-400' : ''}`}
+                      >
+                        {slot.shortLabel}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                /* Multi-Day Daily Scale Chart */
+                <>
+                  <div className="h-48 flex items-end gap-1.5 pt-6 pb-2 border-b border-line-light dark:border-line-dark">
+                    {dailyTrends.map((d) => {
+                      const val = chartMetric === 'hours' ? d.earnedHours : d.tasksCount;
+                      const heightPct = maxDayValue > 0 ? Math.min(100, Math.max(val > 0 ? 8 : 2, (val / maxDayValue) * 100)) : 2;
+                      const isSelected = selectedDayDate === d.dateStr;
+                      const hasActivity = val > 0;
 
-              {/* X-Axis Date Labels */}
-              <div className="flex items-center gap-1.5 pt-1.5 text-[10px] text-muted-light dark:text-muted-dark font-mono">
-                {dailyTrends.map((d, idx) => {
-                  // Only show every Nth date label if there are many days
-                  const showLabel =
-                    dailyTrends.length <= 10 ||
-                    idx % Math.ceil(dailyTrends.length / 8) === 0 ||
-                    idx === dailyTrends.length - 1;
+                      return (
+                        <div
+                          key={d.dateStr}
+                          onClick={() => setSelectedDayDate(isSelected ? null : d.dateStr)}
+                          className="flex-1 flex flex-col items-center justify-end h-full group cursor-pointer relative"
+                          title={`${d.fullDate}: ${d.tasksCount} stages (${d.earnedHours} hrs)`}
+                        >
+                          {/* Value label on top of bar if active */}
+                          {hasActivity && (
+                            <span className="text-[10px] font-bold font-mono text-muted-light dark:text-muted-dark mb-1 group-hover:text-accent-light dark:group-hover:text-accent-dark transition-colors">
+                              {chartMetric === 'hours' ? `${val}h` : val}
+                            </span>
+                          )}
 
-                  return (
-                    <div
-                      key={d.dateStr}
-                      className="flex-1 text-center truncate"
-                    >
-                      {showLabel ? d.formattedDate : ''}
-                    </div>
-                  );
-                })}
-              </div>
+                          {/* Bar body */}
+                          <div
+                            style={{ height: `${heightPct}%` }}
+                            className={`w-full max-w-[36px] rounded-t-md transition-all ${
+                              hasActivity
+                                ? isSelected
+                                  ? 'bg-accent-light dark:bg-accent-dark ring-2 ring-accent-light/50 shadow-md'
+                                  : chartMetric === 'hours'
+                                  ? 'bg-blue-500 dark:bg-blue-600 group-hover:bg-blue-600 dark:group-hover:bg-blue-500'
+                                  : 'bg-emerald-500 dark:bg-emerald-600 group-hover:bg-emerald-600 dark:group-hover:bg-emerald-500'
+                                : 'bg-slate-200/50 dark:bg-slate-800/40 group-hover:bg-slate-300 dark:group-hover:bg-slate-700'
+                            }`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* X-Axis Date Labels */}
+                  <div className="flex items-center gap-1.5 pt-1.5 text-[10px] text-muted-light dark:text-muted-dark font-mono">
+                    {dailyTrends.map((d, idx) => {
+                      const showLabel =
+                        dailyTrends.length <= 10 ||
+                        idx % Math.ceil(dailyTrends.length / 8) === 0 ||
+                        idx === dailyTrends.length - 1;
+
+                      return (
+                        <div
+                          key={d.dateStr}
+                          className="flex-1 text-center truncate"
+                        >
+                          {showLabel ? d.formattedDate : ''}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Selected Day Inspector Box */}
-          {activeDayDetail && (
+          {/* Inspector Box: Either 1D Hourly Inspector OR Day Inspector */}
+          {timeframe === '1d' && lastWorkedDayScale ? (
+            (() => {
+              const activeSlot = selectedHour !== null ? lastWorkedDayScale.hourlySlots.find((s) => s.hour === selectedHour) : null;
+              const displayItems = activeSlot ? activeSlot.items : lastWorkedDayScale.items;
+              const stagesCount = activeSlot ? activeSlot.stages : lastWorkedDayScale.stagesCount;
+              const hoursCount = activeSlot ? activeSlot.hours : lastWorkedDayScale.earnedHours;
+              const titleLabel = activeSlot
+                ? `${activeSlot.hourLabel} Shift Hour (${lastWorkedDayScale.shortDate})`
+                : `Entire Workday (${lastWorkedDayScale.fullDate})`;
+
+              return (
+                <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-line-light dark:border-line-dark animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-line-light/60 dark:border-line-dark/60">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-fg-light dark:text-fg-dark">
+                        {titleLabel}
+                      </span>
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-semibold">
+                        {stagesCount} stages &bull; {hoursCount} earned hrs
+                      </span>
+                      {selectedHour !== null && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedHour(null)}
+                          className="text-[11px] text-accent-light dark:text-accent-dark underline hover:no-underline"
+                        >
+                          Show all workday tasks
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {displayItems.length > 0 ? (
+                    <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {displayItems.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-surface-light dark:bg-surface-dark border border-line-light/50 dark:border-line-dark/50"
+                        >
+                          <div className="flex items-center gap-2 truncate pr-2">
+                            <span className="font-mono text-[10px] text-muted-light dark:text-muted-dark">
+                              {item.tickedAt ? item.tickedAt.substring(11, 16) : ''}
+                            </span>
+                            <span className="font-medium text-fg-light dark:text-fg-dark truncate">
+                              {item.taskName}
+                            </span>
+                            {item.wbs && (
+                              <span className="text-[10px] font-mono text-muted-light dark:text-muted-dark">
+                                ({item.wbs})
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className="text-[11px] font-semibold text-accent-light dark:text-accent-dark">
+                              {item.doneByName}
+                            </span>
+                            {item.persons.length > 1 && (
+                              <span className="text-[10px] font-mono px-1 py-0.2 rounded-full bg-slate-100 dark:bg-slate-800 text-muted-light dark:text-muted-dark border border-line-light/40 dark:border-line-dark/40">
+                                {item.persons.length}p
+                              </span>
+                            )}
+                            <span className="text-[10px] text-muted-light dark:text-muted-dark font-mono font-medium">
+                              {item.quotedHours}h
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-light dark:text-muted-dark mt-2">
+                      No site tasks were recorded during this hour.
+                    </p>
+                  )}
+                </div>
+              );
+            })()
+          ) : activeDayDetail ? (
             <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-line-light dark:border-line-dark animate-in fade-in duration-150">
               <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-line-light/60 dark:border-line-dark/60">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -986,7 +1508,7 @@ export function ReportsClient({
                 </p>
               )}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* 2-Column Split: Cumulative S-Curve & Team Leaderboard */}

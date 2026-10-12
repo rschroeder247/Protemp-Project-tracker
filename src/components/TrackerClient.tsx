@@ -17,6 +17,7 @@ import {
   filterTreeByCompletion,
 } from '@/lib/calc';
 import { supabase, fetchAllTasks } from '@/lib/supabase';
+import { consolidateTeamName } from '@/lib/nameNormalizer';
 import {
   Search,
   X,
@@ -815,7 +816,7 @@ export function TrackerClient({
       kind: 'tick',
       task_id: taskId,
       project_id: taskMap.get(taskId) || 'avi-line-4---e-i-site-installation',
-      done_by_name: val.doneByName,
+      done_by_name: consolidateTeamName(val.doneByName),
       ticked_at: val.tickedAt,
     }));
 

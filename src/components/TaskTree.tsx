@@ -255,18 +255,25 @@ const TreeNodeItem: React.FC<TreeNodeItemProps> = ({
 
       {/* Done By Input / Display */}
       {isChecked && (
-        <div className="ml-9 mt-1 flex items-center gap-2">
+        <div className="ml-9 mt-1 flex items-center gap-2 flex-wrap">
           <User className="w-3.5 h-3.5 text-muted-light dark:text-muted-dark flex-shrink-0" />
           {isLocked ? (
-            <span className="text-xs text-muted-light dark:text-muted-dark font-medium">
-              Done by: <span className="text-fg-light dark:text-fg-dark">
-                <HighlightText text={doneByName || 'Name not recorded'} query={searchQuery} />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-light dark:text-muted-dark font-medium">
+                Done by: <span className="text-fg-light dark:text-fg-dark font-semibold">
+                  <HighlightText text={doneByName ? doneByName.split('/').map(s => s.trim()).filter(Boolean).sort().join(' / ') || doneByName : 'Name not recorded'} query={searchQuery} />
+                </span>
               </span>
-            </span>
+              {doneByName && doneByName.includes('/') && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-muted-light dark:text-muted-dark font-mono border border-line-light/50 dark:border-line-dark/50">
+                  {doneByName.split('/').map(s => s.trim()).filter(Boolean).length} crew
+                </span>
+              )}
+            </div>
           ) : (
             <input
               type="text"
-              placeholder="Who did the work? (e.g. Lindani)"
+              placeholder="Who did the work? Use / for multiple (e.g. Gazi/Phumlani)"
               value={doneByName}
               onChange={(e) => onChangeDoneBy(node.id, e.target.value)}
               className="text-xs px-2.5 py-1.5 rounded-md border border-line-light dark:border-line-dark bg-surface-light dark:bg-surface-dark text-fg-light dark:text-fg-dark focus:outline-hidden focus:ring-1 focus:ring-accent-light dark:focus:ring-accent-dark w-full max-w-xs"

@@ -24,10 +24,12 @@ import {
   ChevronRight,
   Award,
   Zap,
+  Users,
 } from 'lucide-react';
 import { LockScreen } from '@/components/LockScreen';
 import { UserRole } from '@/lib/types';
 import { supabase } from '@/lib/supabase';
+import { parsePersons, consolidateTeamName, matchesPersonOrTeam } from '@/lib/nameNormalizer';
 
 interface ReportsClientProps {
   initialDbTasks: any[];
@@ -56,6 +58,7 @@ export function ReportsClient({
   const [chartMetric, setChartMetric] = useState<MetricOption>('hours');
   const [activitySearch, setActivitySearch] = useState<string>('');
   const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
+  const [teamViewMode, setTeamViewMode] = useState<'individual' | 'crews'>('individual');
 
   // Live state
   const [dbTasks, setDbTasks] = useState<any[]>(initialDbTasks);
@@ -227,6 +230,10 @@ export function ReportsClient({
         const tickedDate = p.ticked_at ? new Date(p.ticked_at) : new Date();
         const dateStr = p.ticked_at ? p.ticked_at.substring(0, 10) : '';
 
+        const rawDone = p.done_by_name || '';
+        const consolidated = consolidateTeamName(rawDone);
+        const persons = parsePersons(rawDone);
+
         return {
           id: `${p.task_id}_${p.ticked_at}`,
           taskId: p.task_id,
@@ -234,7 +241,9 @@ export function ReportsClient({
           wbs: task?.wbs || '',
           projectId: p.project_id,
           projectName: projectMap.get(p.project_id) || p.project_id,
-          doneByName: p.done_by_name || 'Technician',
+          doneByName: consolidated,
+          rawDoneByName: rawDone,
+          persons: persons.length > 0 ? persons : [consolidated],
           tickedAt: p.ticked_at,
           tickedDate,
           dateStr,
@@ -313,7 +322,7 @@ export function ReportsClient({
       const items = dayMap.get(dateStr) || [];
       const tasksCount = items.length;
       const earnedHours = items.reduce((sum, i) => sum + i.quotedHours, 0);
-      const uniqueTechs = Array.from(new Set(items.map((i) => i.doneByName)));
+      const uniquePersons = Array.from(new Set(items.flatMap((i) => i.persons)));
 
       runningTasks += tasksCount;
       runningHours += earnedHours;
@@ -331,7 +340,7 @@ export function ReportsClient({
         fullDate,
         tasksCount,
         earnedHours: Number(earnedHours.toFixed(2)),
-        technicians: uniqueTechs,
+        technicians: uniquePersons,
         items,
         cumulativeTasks: runningTasks,
         cumulativeHours: Number(runningHours.toFixed(2)),
@@ -348,7 +357,7 @@ export function ReportsClient({
     const periodTasks = inPeriodRecords.length;
     const periodHours = inPeriodRecords.reduce((sum, p) => sum + p.quotedHours, 0);
     const activeDaysCount = dailyTrends.filter((d) => d.tasksCount > 0).length;
-    const uniqueTechs = Array.from(new Set(inPeriodRecords.map((p) => p.doneByName)));
+    const uniquePersons = Array.from(new Set(inPeriodRecords.flatMap((p) => p.persons)));
 
     const avgTasksPerActiveDay = activeDaysCount > 0 ? (periodTasks / activeDaysCount).toFixed(1) : '0';
     const avgHoursPerDay = (periodHours / dateRangeDays).toFixed(1);
@@ -358,33 +367,72 @@ export function ReportsClient({
       periodHours: Number(periodHours.toFixed(1)),
       activeDaysCount,
       totalDays: dateRangeDays,
-      uniqueTechCount: uniqueTechs.length,
+      uniqueTechCount: uniquePersons.length,
+      uniquePersons,
       avgTasksPerActiveDay,
       avgHoursPerDay,
     };
   }, [enrichedProgress, dateKeys, dailyTrends, dateRangeDays]);
 
-  // Team Leaderboard
-  const teamLeaderboard = useMemo(() => {
-    const inPeriodRecords = enrichedProgress.filter((p) => p.dateStr >= dateKeys[0] && p.dateStr <= dateKeys[dateKeys.length - 1]);
-    const map = new Map<string, { tasks: number; hours: number }>();
+  // Team Leaderboards (Both Individual Persons & Consolidated Crews)
+  const { individualLeaderboard, crewLeaderboard } = useMemo(() => {
+    const inPeriodRecords = enrichedProgress.filter(
+      (p) => p.dateStr >= dateKeys[0] && p.dateStr <= dateKeys[dateKeys.length - 1]
+    );
 
+    // 1. Individual Persons calculation
+    const personMap = new Map<string, { tasks: number; hours: number; soloTasks: number; crewTasks: number }>();
     for (const r of inPeriodRecords) {
-      const prev = map.get(r.doneByName) || { tasks: 0, hours: 0 };
-      map.set(r.doneByName, {
-        tasks: prev.tasks + 1,
-        hours: prev.hours + r.quotedHours,
-      });
+      const isSolo = r.persons.length <= 1;
+      for (const p of r.persons) {
+        const prev = personMap.get(p) || { tasks: 0, hours: 0, soloTasks: 0, crewTasks: 0 };
+        personMap.set(p, {
+          tasks: prev.tasks + 1,
+          hours: Number((prev.hours + r.quotedHours).toFixed(2)),
+          soloTasks: prev.soloTasks + (isSolo ? 1 : 0),
+          crewTasks: prev.crewTasks + (isSolo ? 0 : 1),
+        });
+      }
     }
 
-    return Array.from(map.entries())
+    const maxPersonTasks = Math.max(1, ...Array.from(personMap.values()).map((v) => v.tasks));
+    const individualList = Array.from(personMap.entries())
       .map(([name, stats]) => ({
         name,
         tasks: stats.tasks,
         hours: Number(stats.hours.toFixed(1)),
+        soloTasks: stats.soloTasks,
+        crewTasks: stats.crewTasks,
+        pctOfMax: Math.round((stats.tasks / maxPersonTasks) * 100),
         pctOfPeriod: periodStats.periodHours > 0 ? Math.round((stats.hours / periodStats.periodHours) * 100) : 0,
       }))
-      .sort((a, b) => b.hours - a.hours);
+      .sort((a, b) => b.tasks - a.tasks || b.hours - a.hours);
+
+    // 2. Consolidated Crews calculation
+    const crewMap = new Map<string, { tasks: number; hours: number; persons: string[] }>();
+    for (const r of inPeriodRecords) {
+      const prev = crewMap.get(r.doneByName) || { tasks: 0, hours: 0, persons: r.persons };
+      crewMap.set(r.doneByName, {
+        tasks: prev.tasks + 1,
+        hours: Number((prev.hours + r.quotedHours).toFixed(2)),
+        persons: r.persons,
+      });
+    }
+
+    const maxCrewTasks = Math.max(1, ...Array.from(crewMap.values()).map((v) => v.tasks));
+    const crewList = Array.from(crewMap.entries())
+      .map(([name, stats]) => ({
+        name,
+        tasks: stats.tasks,
+        hours: Number(stats.hours.toFixed(1)),
+        persons: stats.persons,
+        memberCount: stats.persons.length,
+        pctOfMax: Math.round((stats.tasks / maxCrewTasks) * 100),
+        pctOfPeriod: periodStats.periodHours > 0 ? Math.round((stats.hours / periodStats.periodHours) * 100) : 0,
+      }))
+      .sort((a, b) => b.tasks - a.tasks || b.hours - a.hours);
+
+    return { individualLeaderboard: individualList, crewLeaderboard: crewList };
   }, [enrichedProgress, dateKeys, periodStats.periodHours]);
 
   // Filtered recent activity search
@@ -397,9 +445,9 @@ export function ReportsClient({
         return (
           p.taskName.toLowerCase().includes(q) ||
           p.wbs.toLowerCase().includes(q) ||
-          p.doneByName.toLowerCase().includes(q) ||
           p.projectName.toLowerCase().includes(q) ||
-          p.dateStr.includes(q)
+          p.dateStr.includes(q) ||
+          matchesPersonOrTeam(p.doneByName, q)
         );
       })
       .slice(0, 100);
@@ -661,6 +709,18 @@ export function ReportsClient({
                   <User className="w-3.5 h-3.5 text-accent-light dark:text-accent-dark" />
                   <span>By: {latestEntry.doneByName}</span>
                 </div>
+                {latestEntry.persons.length > 1 && (
+                  <div className="hidden sm:flex items-center gap-1">
+                    {latestEntry.persons.map((person) => (
+                      <span
+                        key={person}
+                        className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold border border-emerald-400/20"
+                      >
+                        {person}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 text-xs font-medium border border-blue-200 dark:border-blue-800">
                   <span>{latestEntry.quotedHours} hrs</span>
                 </div>
@@ -857,13 +917,23 @@ export function ReportsClient({
           {activeDayDetail && (
             <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-line-light dark:border-line-dark animate-in fade-in duration-150">
               <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-line-light/60 dark:border-line-dark/60">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-fg-light dark:text-fg-dark">
                     {activeDayDetail.fullDate}
                   </span>
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold">
-                    {activeDayDetail.tasksCount} stages completed &bull; {activeDayDetail.earnedHours} earned hrs
+                    {activeDayDetail.tasksCount} stages &bull; {activeDayDetail.earnedHours} earned hrs
                   </span>
+                  {activeDayDetail.technicians.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="text-[10px] text-muted-light dark:text-muted-dark">Active team:</span>
+                      {activeDayDetail.technicians.map((t) => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 dark:bg-slate-800 text-fg-light dark:text-fg-dark font-semibold">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -894,11 +964,16 @@ export function ReportsClient({
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
                         <span className="text-[11px] font-semibold text-accent-light dark:text-accent-dark">
                           {item.doneByName}
                         </span>
-                        <span className="text-[10px] text-muted-light dark:text-muted-dark">
+                        {item.persons.length > 1 && (
+                          <span className="text-[10px] font-mono px-1 py-0.2 rounded-full bg-slate-100 dark:bg-slate-800 text-muted-light dark:text-muted-dark border border-line-light/40 dark:border-line-dark/40">
+                            {item.persons.length}p
+                          </span>
+                        )}
+                        <span className="text-[10px] text-muted-light dark:text-muted-dark font-mono font-medium">
                           {item.quotedHours}h
                         </span>
                       </div>
@@ -993,66 +1068,150 @@ export function ReportsClient({
           {/* Team Contribution Leaderboard */}
           <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-2xl p-4 shadow-xs flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                 <div>
                   <h3 className="text-sm font-bold text-fg-light dark:text-fg-dark flex items-center gap-1.5">
                     <Award className="w-4 h-4 text-amber-500" />
                     Team Contribution Breakdown
                   </h3>
                   <p className="text-[11px] text-muted-light dark:text-muted-dark">
-                    Work completed by technicians in selected {timeframe}
+                    Work completed in selected {timeframe}
                   </p>
                 </div>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-fg-light dark:text-fg-dark">
-                  {teamLeaderboard.length} Technicians
-                </span>
+
+                {/* View Mode Toggle: Individual vs Crews */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-line-light dark:border-line-dark text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setTeamViewMode('individual')}
+                    className={`px-2 py-0.5 rounded-md font-medium transition-all ${
+                      teamViewMode === 'individual'
+                        ? 'bg-surface-light dark:bg-surface-dark text-fg-light dark:text-fg-dark shadow-xs font-bold'
+                        : 'text-muted-light dark:text-muted-dark hover:text-fg-light dark:hover:text-fg-dark'
+                    }`}
+                    title="Breakdown by each individual person who worked"
+                  >
+                    Individuals ({individualLeaderboard.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTeamViewMode('crews')}
+                    className={`px-2 py-0.5 rounded-md font-medium transition-all ${
+                      teamViewMode === 'crews'
+                        ? 'bg-surface-light dark:bg-surface-dark text-fg-light dark:text-fg-dark shadow-xs font-bold'
+                        : 'text-muted-light dark:text-muted-dark hover:text-fg-light dark:hover:text-fg-dark'
+                    }`}
+                    title="Consolidated crews (order-independent)"
+                  >
+                    Crews ({crewLeaderboard.length})
+                  </button>
+                </div>
               </div>
 
-              {teamLeaderboard.length > 0 ? (
-                <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
-                  {teamLeaderboard.map((tech, idx) => (
-                    <div key={tech.name} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                              idx === 0
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                                : idx === 1
-                                ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200'
-                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+              {teamViewMode === 'individual' ? (
+                individualLeaderboard.length > 0 ? (
+                  <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
+                    {individualLeaderboard.map((tech, idx) => (
+                      <div key={tech.name} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                                idx === 0
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  : idx === 1
+                                  ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200'
+                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                              }`}
+                            >
+                              {idx + 1}
+                            </span>
+                            <span className="font-semibold text-fg-light dark:text-fg-dark">
+                              {tech.name}
+                            </span>
+                            {tech.crewTasks > 0 && tech.soloTasks > 0 && (
+                              <span className="text-[10px] text-muted-light dark:text-muted-dark hidden sm:inline">
+                                ({tech.soloTasks} solo, {tech.crewTasks} crew)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 font-mono text-[11px]">
+                            <span className="font-bold text-fg-light dark:text-fg-dark">
+                              {tech.tasks} stages
+                            </span>
+                            <span className="text-muted-light dark:text-muted-dark">
+                              ({tech.hours} hrs)
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            style={{ width: `${Math.min(100, Math.max(8, tech.pctOfMax))}%` }}
+                            className={`h-full rounded-full ${
+                              idx === 0 ? 'bg-amber-500' : idx === 1 ? 'bg-blue-500' : 'bg-emerald-500'
                             }`}
-                          >
-                            {idx + 1}
-                          </span>
-                          <span className="font-semibold text-fg-light dark:text-fg-dark">
-                            {tech.name}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 font-mono text-[11px]">
-                          <span className="font-bold text-fg-light dark:text-fg-dark">
-                            {tech.tasks} stages
-                          </span>
-                          <span className="text-muted-light dark:text-muted-dark">
-                            ({tech.hours} hrs &bull; {tech.pctOfPeriod}%)
-                          </span>
+                          />
                         </div>
                       </div>
-                      <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                          style={{ width: `${Math.min(100, Math.max(5, tech.pctOfPeriod))}%` }}
-                          className={`h-full rounded-full ${
-                            idx === 0 ? 'bg-amber-500' : idx === 1 ? 'bg-blue-500' : 'bg-slate-400'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-8 text-center text-xs text-muted-light dark:text-muted-dark">
+                    No individual progress records found in this period.
+                  </div>
+                )
               ) : (
-                <div className="py-8 text-center text-xs text-muted-light dark:text-muted-dark">
-                  No technician entries found in this period.
-                </div>
+                crewLeaderboard.length > 0 ? (
+                  <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
+                    {crewLeaderboard.map((crew, idx) => (
+                      <div key={crew.name} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 max-w-[65%] truncate">
+                            <span
+                              className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                                idx === 0
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                  : idx === 1
+                                  ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200'
+                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                              }`}
+                            >
+                              {idx + 1}
+                            </span>
+                            <span className="font-semibold text-fg-light dark:text-fg-dark truncate" title={crew.name}>
+                              {crew.name}
+                            </span>
+                            {crew.memberCount > 1 && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-slate-800 font-mono text-muted-light dark:text-muted-dark border border-line-light/50 dark:border-line-dark/50 flex-shrink-0">
+                                {crew.memberCount} crew
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 font-mono text-[11px] flex-shrink-0">
+                            <span className="font-bold text-fg-light dark:text-fg-dark">
+                              {crew.tasks} stages
+                            </span>
+                            <span className="text-muted-light dark:text-muted-dark">
+                              ({crew.hours} hrs)
+                            </span>
+                          </div>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            style={{ width: `${Math.min(100, Math.max(8, crew.pctOfMax))}%` }}
+                            className={`h-full rounded-full ${
+                              idx === 0 ? 'bg-amber-500' : idx === 1 ? 'bg-blue-500' : 'bg-purple-500'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-8 text-center text-xs text-muted-light dark:text-muted-dark">
+                    No crew entries found in this period.
+                  </div>
+                )
               )}
             </div>
 
@@ -1116,10 +1275,17 @@ export function ReportsClient({
                         {entry.tickedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="py-2 px-3 whitespace-nowrap">
-                        <span className="font-semibold text-fg-light dark:text-fg-dark inline-flex items-center gap-1">
-                          <User className="w-3 h-3 text-accent-light dark:text-accent-dark" />
-                          {entry.doneByName}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-fg-light dark:text-fg-dark inline-flex items-center gap-1">
+                            <User className="w-3 h-3 text-accent-light dark:text-accent-dark" />
+                            {entry.doneByName}
+                          </span>
+                          {entry.persons.length > 1 && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-slate-800 text-muted-light dark:text-muted-dark border border-line-light/50 dark:border-line-dark/50">
+                              {entry.persons.length} crew
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-2 px-3 font-medium text-fg-light dark:text-fg-dark max-w-xs truncate">
                         {entry.taskName}

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import {
   CheckCircle2,
   RefreshCw,
@@ -15,6 +16,7 @@ import {
   Key,
   Upload,
   Box,
+  TrendingUp,
 } from 'lucide-react';
 import { UserRole } from '@/lib/types';
 
@@ -167,6 +169,16 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="hidden sm:inline">Search</span>
               </button>
             )}
+
+            {/* Daily Progress Trends & Report Button */}
+            <Link
+              href="/reports"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-400/30 transition-colors"
+              title="Daily Progress Trends, Velocity & Historical Report"
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Trends</span>
+            </Link>
 
             {/* Sync MS Project Button (Admin and Staff only) */}
             {role !== 'contractor' && (

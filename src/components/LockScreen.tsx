@@ -135,7 +135,7 @@ export function LockScreen({ onAuthenticated }: LockScreenProps) {
             PROTEMP OPERATIONS
           </h1>
           <p className="text-xs font-medium text-slate-400">
-            AVI Line 4 Site Progress Tracker
+            Project Monitoring &amp; Site Progress
           </p>
         </div>
 

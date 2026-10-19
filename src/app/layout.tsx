@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Protemp Project Tracker',
+  title: 'Project Monitoring | Protemp Operations',
   description: 'Site progress tracking with live updates and MS Project integration',
 };
 

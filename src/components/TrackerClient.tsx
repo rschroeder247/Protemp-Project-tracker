@@ -869,7 +869,7 @@ export function TrackerClient({
     <div className="min-h-screen pb-12">
       {/* 3-Tier Navigation Header */}
       <Header
-        title="AVI Line 4 Site Progress"
+        title="Project Monitoring"
         subtitle="MS Project Master & Linked Subprojects"
         role={role}
         userName={userName}

@@ -324,7 +324,7 @@ export function LockScreen({ onAuthenticated }: LockScreenProps) {
               <div className="flex items-center gap-2">
                 <Shield className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
                 <span>
-                  <strong className="text-slate-200">Admin:</strong> Master PIN 9824 / Password
+                  <strong className="text-slate-200">Admin:</strong> Master PIN / Password 2396
                 </span>
               </div>
             </div>

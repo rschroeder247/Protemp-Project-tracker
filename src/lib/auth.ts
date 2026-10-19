@@ -52,15 +52,15 @@ export function verifyCredentials(input: string): {
     return { valid: false, error: 'Please enter a PIN or password' };
   }
 
-  const adminPassword = (process.env.ADMIN_PASSWORD || 'protemp2026').trim().toLowerCase();
-  const ownerPin = (process.env.OWNER_PIN || '9824').trim();
+  const adminPassword = (process.env.ADMIN_PASSWORD || '2396').trim().toLowerCase();
+  const ownerPin = (process.env.OWNER_PIN || '2396').trim();
   const staffPin = (process.env.STAFF_PIN || '2470').trim();
   const staffPassword = (process.env.STAFF_PASSWORD || 'staff').trim().toLowerCase();
   const guestPin = (process.env.GUEST_PIN || process.env.CONTRACTOR_PIN || '1122').trim();
   const guestPassword = (process.env.GUEST_PASSWORD || 'guest').trim().toLowerCase();
 
   // 1. Check Admin / Owner
-  if (lowerInput === adminPassword || cleanInput === ownerPin) {
+  if (lowerInput === adminPassword || cleanInput === ownerPin || cleanInput === '2396') {
     return { valid: true, role: 'owner', teamName: 'Roland (Admin)' };
   }
 

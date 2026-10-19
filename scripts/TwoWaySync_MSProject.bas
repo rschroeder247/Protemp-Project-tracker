@@ -112,10 +112,11 @@ Public Sub BackupXmlWithRotation(ByVal xmlPath As String, Optional ByVal maxBack
         End If
     Next oFile
     
-    While fileCount > maxBackups
-        Dim oldestFile As Object
+    Dim oldestFile As Object
+    Dim oldestDate As Date
+    
+    Do While fileCount > maxBackups
         Set oldestFile = Nothing
-        Dim oldestDate As Date
         oldestDate = Now + 100
         
         For Each oFile In oFolder.Files
@@ -132,9 +133,9 @@ Public Sub BackupXmlWithRotation(ByVal xmlPath As String, Optional ByVal maxBack
             oldestFile.Delete True
             fileCount = fileCount - 1
         Else
-            Exit While
+            Exit Do
         End If
-    Wend
+    Loop
 End Sub
 
 ' -------------------------------------------------------------------------

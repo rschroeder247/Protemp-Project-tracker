@@ -63,6 +63,7 @@ export function ReportsClient({
   const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [teamViewMode, setTeamViewMode] = useState<'individual' | 'crews'>('individual');
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
 
   // Live state
   const [dbTasks, setDbTasks] = useState<any[]>(initialDbTasks);
@@ -257,14 +258,24 @@ export function ReportsClient({
       .sort((a, b) => b.tickedDate.getTime() - a.tickedDate.getTime());
   }, [filteredProgress, taskLookup, projectMap]);
 
+  // Filter progress by selected team if active
+  const displayProgress = useMemo(() => {
+    if (selectedTeamFilter === 'all') return enrichedProgress;
+    const target = selectedTeamFilter.toLowerCase();
+    return enrichedProgress.filter((r) =>
+      r.doneByName.toLowerCase().includes(target) ||
+      r.persons.some((p: string) => p.toLowerCase().includes(target))
+    );
+  }, [enrichedProgress, selectedTeamFilter]);
+
   // Most recent data entry
-  const latestEntry = enrichedProgress.length > 0 ? enrichedProgress[0] : null;
+  const latestEntry = displayProgress.length > 0 ? displayProgress[0] : null;
 
   // Detailed Scale Analysis for the Last Worked Day
   const lastWorkedDayScale = useMemo(() => {
-    if (!latestEntry || enrichedProgress.length === 0) return null;
+    if (!latestEntry || displayProgress.length === 0) return null;
     const dateStr = latestEntry.dateStr;
-    const dayItems = enrichedProgress.filter((p) => p.dateStr === dateStr);
+    const dayItems = displayProgress.filter((p) => p.dateStr === dateStr);
     const stagesCount = dayItems.length;
     const earnedHours = Number(dayItems.reduce((sum, i) => sum + i.quotedHours, 0).toFixed(2));
     const technicians = Array.from(new Set(dayItems.flatMap((i) => i.persons)));
@@ -343,8 +354,8 @@ export function ReportsClient({
       .sort((a, b) => b.stages - a.stages || b.hours - a.hours);
 
     // Historical average daily earned hours for benchmark scale
-    const activeDayKeys = new Set(enrichedProgress.map((p) => p.dateStr));
-    const totalEarnedHistorical = enrichedProgress.reduce((sum, p) => sum + p.quotedHours, 0);
+    const activeDayKeys = new Set(displayProgress.map((p) => p.dateStr));
+    const totalEarnedHistorical = displayProgress.reduce((sum, p) => sum + p.quotedHours, 0);
     const avgDailyEarned = activeDayKeys.size > 0 ? totalEarnedHistorical / activeDayKeys.size : earnedHours;
     const scaleRatio = avgDailyEarned > 0 ? earnedHours / avgDailyEarned : 1;
     const scalePercent = Math.round(scaleRatio * 100);
@@ -397,7 +408,7 @@ export function ReportsClient({
       scaleBg,
       items: dayItems,
     };
-  }, [latestEntry, enrichedProgress]);
+  }, [latestEntry, displayProgress]);
 
   // Calendar Date Range Construction
   const { dateRangeDays, startDate, endDate, dateKeys } = useMemo(() => {
@@ -407,8 +418,8 @@ export function ReportsClient({
     let start = new Date(end);
 
     if (timeframe === '1d') {
-      if (enrichedProgress.length > 0) {
-        const lastDateStr = enrichedProgress[0].dateStr;
+      if (displayProgress.length > 0) {
+        const lastDateStr = displayProgress[0].dateStr;
         const [y, m, d] = lastDateStr.split('-').map(Number);
         const lDate = new Date(y, m - 1, d);
         return {
@@ -430,8 +441,8 @@ export function ReportsClient({
       start.setDate(end.getDate() - 29);
     } else {
       // 'all' time: find earliest progress date or fallback 30 days
-      if (enrichedProgress.length > 0) {
-        const earliest = enrichedProgress[enrichedProgress.length - 1].tickedDate;
+      if (displayProgress.length > 0) {
+        const earliest = displayProgress[displayProgress.length - 1].tickedDate;
         start = new Date(earliest.getFullYear(), earliest.getMonth(), earliest.getDate());
       } else {
         start.setDate(end.getDate() - 29);
@@ -456,13 +467,13 @@ export function ReportsClient({
       endDate: end,
       dateKeys: keys,
     };
-  }, [timeframe, enrichedProgress]);
+  }, [timeframe, displayProgress]);
 
   // Aggregate progress records into daily trend buckets
   const dailyTrends = useMemo(() => {
     // Map progress by date string
-    const dayMap = new Map<string, typeof enrichedProgress>();
-    for (const ep of enrichedProgress) {
+    const dayMap = new Map<string, typeof displayProgress>();
+    for (const ep of displayProgress) {
       const existing = dayMap.get(ep.dateStr) || [];
       existing.push(ep);
       dayMap.set(ep.dateStr, existing);
@@ -472,7 +483,7 @@ export function ReportsClient({
     let runningHours = 0;
 
     // First calculate total prior progress before startDate for cumulative accuracy
-    for (const ep of enrichedProgress) {
+    for (const ep of displayProgress) {
       if (ep.dateStr < dateKeys[0]) {
         runningTasks += 1;
         runningHours += ep.quotedHours;
@@ -510,11 +521,11 @@ export function ReportsClient({
     });
 
     return days;
-  }, [dateKeys, enrichedProgress, totalLeafTasks]);
+  }, [dateKeys, displayProgress, totalLeafTasks]);
 
   // Period-specific KPIs
   const periodStats = useMemo(() => {
-    const inPeriodRecords = enrichedProgress.filter((p) => p.dateStr >= dateKeys[0] && p.dateStr <= dateKeys[dateKeys.length - 1]);
+    const inPeriodRecords = displayProgress.filter((p) => p.dateStr >= dateKeys[0] && p.dateStr <= dateKeys[dateKeys.length - 1]);
     const periodTasks = inPeriodRecords.length;
     const periodHours = inPeriodRecords.reduce((sum, p) => sum + p.quotedHours, 0);
     const activeDaysCount = dailyTrends.filter((d) => d.tasksCount > 0).length;
@@ -533,11 +544,11 @@ export function ReportsClient({
       avgTasksPerActiveDay,
       avgHoursPerDay,
     };
-  }, [enrichedProgress, dateKeys, dailyTrends, dateRangeDays]);
+  }, [displayProgress, dateKeys, dailyTrends, dateRangeDays]);
 
   // Team Leaderboards (Both Individual Persons & Consolidated Crews)
   const { individualLeaderboard, crewLeaderboard } = useMemo(() => {
-    const inPeriodRecords = enrichedProgress.filter(
+    const inPeriodRecords = displayProgress.filter(
       (p) => p.dateStr >= dateKeys[0] && p.dateStr <= dateKeys[dateKeys.length - 1]
     );
 
@@ -594,14 +605,14 @@ export function ReportsClient({
       .sort((a, b) => b.tasks - a.tasks || b.hours - a.hours);
 
     return { individualLeaderboard: individualList, crewLeaderboard: crewList };
-  }, [enrichedProgress, dateKeys, periodStats.periodHours]);
+  }, [displayProgress, dateKeys, periodStats.periodHours]);
 
   // Filtered recent activity search
   const filteredActivityList = useMemo(() => {
     const q = activitySearch.trim().toLowerCase();
-    if (!q) return enrichedProgress.slice(0, 50);
+    if (!q) return displayProgress.slice(0, 50);
 
-    return enrichedProgress
+    return displayProgress
       .filter((p) => {
         return (
           p.taskName.toLowerCase().includes(q) ||
@@ -612,7 +623,7 @@ export function ReportsClient({
         );
       })
       .slice(0, 100);
-  }, [enrichedProgress, activitySearch]);
+  }, [displayProgress, activitySearch]);
 
   // Selected day details for inspector modal/popover
   const activeDayDetail = useMemo(() => {
@@ -858,9 +869,58 @@ export function ReportsClient({
                 All Time
               </button>
             </div>
+
+            {/* Filter by Team Dropdown */}
+            <div className="relative">
+              <select
+                value={selectedTeamFilter}
+                onChange={(e) => setSelectedTeamFilter(e.target.value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs appearance-none pr-7 ${
+                  selectedTeamFilter !== 'all'
+                    ? 'bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-400 dark:border-amber-600 font-bold ring-1 ring-amber-400/40'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border-line-light dark:border-line-dark'
+                }`}
+                title="Filter progress report by team"
+              >
+                <option value="all">👥 All Teams</option>
+                {Array.from({ length: 10 }, (_, i) => `Team ${i + 1}`).map((team) => (
+                  <option key={team} value={team}>
+                    {team}
+                  </option>
+                ))}
+                <option value="Guest">Guest</option>
+                <option value="Lindani">Lindani</option>
+                <option value="Gazi">Gazi</option>
+                <option value="Fani">Fani</option>
+                <option value="Phumlani">Phumlani</option>
+                <option value="Khetha">Khetha</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-muted-light dark:text-muted-dark">
+                <ChevronRight className="w-3.5 h-3.5 rotate-90" />
+              </div>
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Active Team Filter Banner on Reports */}
+      {selectedTeamFilter !== 'all' && (
+        <div className="max-w-5xl mx-auto px-4 mt-3">
+          <div className="flex items-center justify-between text-xs px-3 py-2 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl text-amber-800 dark:text-amber-300">
+            <span className="flex items-center gap-2 font-medium">
+              <Users className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              Reports filtered to activity for <strong>{selectedTeamFilter}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedTeamFilter('all')}
+              className="text-xs font-semibold underline hover:opacity-80 cursor-pointer"
+            >
+              Show All Teams
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Report Dashboard */}
       <main className="max-w-5xl mx-auto px-4 mt-4 space-y-4">

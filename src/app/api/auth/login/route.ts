@@ -29,15 +29,18 @@ export async function POST(req: NextRequest) {
     // Determine default display name if not provided
     let displayName = technicianName;
     if (!displayName) {
-      if (role === 'owner') displayName = 'Roland (Admin)';
+      if (verification.teamName) displayName = verification.teamName;
+      else if (role === 'owner') displayName = 'Roland (Admin)';
       else if (role === 'staff') displayName = 'Staff Member';
-      else displayName = 'Contractor Team';
+      else displayName = 'Guest';
     }
 
     const now = Date.now();
     const session: AuthSession = {
       role,
       name: displayName,
+      teamId: verification.teamId,
+      teamName: verification.teamName,
       createdAt: now,
       expiresAt: now + SESSION_DURATION_MS,
     };
@@ -62,6 +65,8 @@ export async function POST(req: NextRequest) {
       success: true,
       role,
       name: displayName,
+      teamId: verification.teamId,
+      teamName: verification.teamName,
       allowedSubprojects,
       token,
     });

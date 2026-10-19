@@ -273,4 +273,69 @@ export function filterTreeByCompletion(
   return result;
 }
 
+/**
+ * Recursively filters a task tree by a team name (e.g. 'Team 1', 'Team 2', 'Guest', 'Lindani', etc.).
+ * If teamFilter is 'all' or empty, returns original nodes unmodified.
+ * Supports composite teams (e.g. "Team 1 / Gazi" matches "Team 1").
+ */
+export function filterTreeByTeam(
+  nodes: TaskNode[],
+  teamFilter: string,
+  pendingTicks?: Record<string, any>
+): TaskNode[] {
+  if (!teamFilter || teamFilter === 'all') return nodes;
+
+  const target = teamFilter.trim().toLowerCase();
+
+  function matchesWorker(name: string | undefined): boolean {
+    if (!name) return false;
+    const lower = name.toLowerCase();
+    return lower.includes(target);
+  }
+
+  function filterNode(node: TaskNode): TaskNode | null {
+    const pending = pendingTicks && pendingTicks[node.id];
+    const isDone = node.isLocked || !!pending;
+    const workerName = pending ? pending.doneByName : node.doneByName;
+
+    if (!node.isSummary) {
+      if (isDone && matchesWorker(workerName)) {
+        return { ...node };
+      }
+      return null;
+    }
+
+    if (!node.children || node.children.length === 0) {
+      return null;
+    }
+
+    const matchedChildren: TaskNode[] = [];
+    for (const child of node.children) {
+      const filtered = filterNode(child);
+      if (filtered) {
+        matchedChildren.push(filtered);
+      }
+    }
+
+    if (matchedChildren.length === 0) {
+      return null;
+    }
+
+    return {
+      ...node,
+      children: matchedChildren,
+    };
+  }
+
+  const result: TaskNode[] = [];
+  for (const node of nodes) {
+    const filtered = filterNode(node);
+    if (filtered) {
+      result.push(filtered);
+    }
+  }
+
+  return result;
+}
+
 

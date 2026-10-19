@@ -15,6 +15,7 @@ import {
   getAllSummaryIds,
   filterTreeByQuery,
   filterTreeByCompletion,
+  filterTreeByTeam,
 } from '@/lib/calc';
 import { supabase, fetchAllTasks } from '@/lib/supabase';
 import { consolidateTeamName } from '@/lib/nameNormalizer';
@@ -32,6 +33,8 @@ import {
   Key,
   Lock,
   AlertCircle,
+  Users,
+  ChevronDown,
 } from 'lucide-react';
 
 interface TrackerClientProps {
@@ -224,6 +227,7 @@ export function TrackerClient({
   // Search & Expand/Minimize state
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [hasInitializedExpanded, setHasInitializedExpanded] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -672,10 +676,15 @@ export function TrackerClient({
     return Math.max(0, allStats.completedLeafTasks - visStats.completedLeafTasks);
   }, [displayedNodes, completionFilteredNodes, hideCompleted]);
 
-  // Search filtering applied on completion-filtered nodes
+  // Team filtering applied on completion-filtered nodes
+  const teamFilteredNodes = useMemo(() => {
+    return filterTreeByTeam(completionFilteredNodes, selectedTeamFilter, pendingTicks);
+  }, [completionFilteredNodes, selectedTeamFilter, pendingTicks]);
+
+  // Search filtering applied on team-filtered nodes
   const { filteredNodes, matchCount, autoExpandIds } = useMemo(() => {
-    return filterTreeByQuery(completionFilteredNodes, searchQuery);
-  }, [completionFilteredNodes, searchQuery]);
+    return filterTreeByQuery(teamFilteredNodes, searchQuery);
+  }, [teamFilteredNodes, searchQuery]);
 
   // Global search count across all tasks
   const globalMatchCount = useMemo(() => {
@@ -1042,7 +1051,53 @@ export function TrackerClient({
                   </>
                 )}
               </button>
+
+              {/* Filter by Team Dropdown */}
+              <div className="flex-shrink-0 relative">
+                <select
+                  value={selectedTeamFilter}
+                  onChange={(e) => setSelectedTeamFilter(e.target.value)}
+                  className={`px-2.5 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-xs appearance-none pr-7 ${
+                    selectedTeamFilter !== 'all'
+                      ? 'bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-400 dark:border-amber-600 font-bold ring-1 ring-amber-400/40'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border-line-light dark:border-line-dark'
+                  }`}
+                  title="Filter tasks completed by team"
+                >
+                  <option value="all">👥 All Teams</option>
+                  {Array.from({ length: 10 }, (_, i) => `Team ${i + 1}`).map((team) => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                  <option value="Guest">Guest</option>
+                  <option value="Lindani">Lindani</option>
+                  <option value="Gazi">Gazi</option>
+                  <option value="Fani">Fani</option>
+                  <option value="Phumlani">Phumlani</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1.5 text-muted-light dark:text-muted-dark">
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </div>
+              </div>
             </div>
+
+            {/* Team Filter Active Banner */}
+            {selectedTeamFilter !== 'all' && (
+              <div className="flex items-center justify-between text-xs px-2.5 py-1.5 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl text-amber-800 dark:text-amber-300">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  Filtered to tasks completed by <strong>{selectedTeamFilter}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamFilter('all')}
+                  className="text-xs font-semibold underline hover:opacity-80 ml-2 cursor-pointer"
+                >
+                  Show All Teams
+                </button>
+              </div>
+            )}
 
             {/* Search Match Info & Cross-Tier Discovery */}
             {searchQuery.trim() && (

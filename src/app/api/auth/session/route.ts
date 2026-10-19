@@ -38,6 +38,8 @@ export async function GET(req: NextRequest) {
       authenticated: true,
       role: session.role,
       name: session.name,
+      teamId: session.teamId,
+      teamName: session.teamName,
       allowedSubprojects,
     });
   } catch (err: any) {

@@ -4,45 +4,86 @@ import { UserRole } from './types';
 export interface AuthSession {
   role: UserRole;
   name: string;
+  teamId?: string;
+  teamName?: string;
   createdAt: number;
   expiresAt: number;
 }
+
+export interface TeamDefinition {
+  id: string; // 'team_1', 'team_2', etc.
+  name: string; // 'Team 1', 'Team 2', etc.
+  pin: string; // '1001', '1002', etc.
+  password: string; // 'team1', 'team2', etc.
+  role: UserRole;
+}
+
+// 10 Distinct Teams with dedicated PINs (1001-1010) and passwords (team1-team10)
+export const TEAMS: TeamDefinition[] = Array.from({ length: 10 }, (_, i) => {
+  const num = i + 1;
+  const defaultPin = String(1000 + num);
+  const defaultPass = `team${num}`;
+  return {
+    id: `team_${num}`,
+    name: `Team ${num}`,
+    pin: (process.env[`TEAM_${num}_PIN`] || defaultPin).trim(),
+    password: (process.env[`TEAM_${num}_PASSWORD`] || defaultPass).trim(),
+    role: 'contractor' as UserRole,
+  };
+});
 
 const DEFAULT_AUTH_SECRET = 'protemp_secure_auth_secret_jwt_2026_x7a9k';
 const SESSION_COOKIE_NAME = 'protemp_session';
 const SESSION_DURATION_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
 
 /**
- * Validates a PIN or password and returns the matched role.
+ * Validates a PIN or password and returns the matched role and team details.
  */
 export function verifyCredentials(input: string): {
   valid: boolean;
   role?: UserRole;
+  teamId?: string;
+  teamName?: string;
   error?: string;
 } {
   const cleanInput = (input || '').trim();
+  const lowerInput = cleanInput.toLowerCase();
   if (!cleanInput) {
     return { valid: false, error: 'Please enter a PIN or password' };
   }
 
-  const adminPassword = (process.env.ADMIN_PASSWORD || 'protemp2026').trim();
+  const adminPassword = (process.env.ADMIN_PASSWORD || 'protemp2026').trim().toLowerCase();
   const ownerPin = (process.env.OWNER_PIN || '9824').trim();
   const staffPin = (process.env.STAFF_PIN || '2470').trim();
-  const contractorPin = (process.env.CONTRACTOR_PIN || '1122').trim();
+  const staffPassword = (process.env.STAFF_PASSWORD || 'staff').trim().toLowerCase();
+  const guestPin = (process.env.GUEST_PIN || process.env.CONTRACTOR_PIN || '1122').trim();
+  const guestPassword = (process.env.GUEST_PASSWORD || 'guest').trim().toLowerCase();
 
   // 1. Check Admin / Owner
-  if (cleanInput === adminPassword || cleanInput === ownerPin) {
-    return { valid: true, role: 'owner' };
+  if (lowerInput === adminPassword || cleanInput === ownerPin) {
+    return { valid: true, role: 'owner', teamName: 'Roland (Admin)' };
   }
 
-  // 2. Check Staff
-  if (cleanInput === staffPin) {
-    return { valid: true, role: 'staff' };
+  // 2. Check 10 Teams (e.g. PIN 1001 or password "team1" for Team 1)
+  for (const team of TEAMS) {
+    if (cleanInput === team.pin || lowerInput === team.password.toLowerCase()) {
+      return {
+        valid: true,
+        role: team.role,
+        teamId: team.id,
+        teamName: team.name,
+      };
+    }
   }
 
-  // 3. Check Contractor
-  if (cleanInput === contractorPin) {
-    return { valid: true, role: 'contractor' };
+  // 3. Check Staff
+  if (cleanInput === staffPin || lowerInput === staffPassword) {
+    return { valid: true, role: 'staff', teamName: 'Staff Member' };
+  }
+
+  // 4. Check Guest
+  if (cleanInput === guestPin || lowerInput === guestPassword) {
+    return { valid: true, role: 'viewer', teamId: 'guest', teamName: 'Guest' };
   }
 
   return { valid: false, error: 'Incorrect PIN or password. Please try again.' };

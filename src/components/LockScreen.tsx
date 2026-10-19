@@ -23,6 +23,7 @@ export function LockScreen({ onAuthenticated }: LockScreenProps) {
   const [customName, setCustomName] = useState('');
   const [isEnteringName, setIsEnteringName] = useState(false);
   const [detectedRole, setDetectedRole] = useState<UserRole | null>(null);
+  const [detectedTeam, setDetectedTeam] = useState<string | null>(null);
   const [allowedSubprojects, setAllowedSubprojects] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,10 +76,14 @@ export function LockScreen({ onAuthenticated }: LockScreenProps) {
         return;
       }
 
-      // If contractor or staff, let them confirm or choose their name before entering
+      // If team or staff, let them confirm or choose their name before entering
       if ((data.role === 'staff' || data.role === 'contractor') && !isEnteringName) {
         setDetectedRole(data.role);
         setAllowedSubprojects(data.allowedSubprojects || []);
+        if (data.teamName) {
+          setDetectedTeam(data.teamName);
+          setTechnicianName(data.teamName);
+        }
         setIsEnteringName(true);
         setIsLoading(false);
         return;
@@ -146,32 +151,49 @@ export function LockScreen({ onAuthenticated }: LockScreenProps) {
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold mb-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 <UserCheck className="w-3.5 h-3.5" />
                 <span>
-                  {detectedRole === 'contractor' ? 'Contractor Access' : 'Staff Access'} Verified
+                  {detectedTeam ? `${detectedTeam} Verified` : `${detectedRole === 'contractor' ? 'Contractor' : 'Staff'} Verified`}
                 </span>
               </div>
               <p className="text-sm font-semibold text-white">Who is on site today?</p>
               <p className="text-xs text-slate-400 mt-0.5">
-                Your name will be stamped on your ticked stages
+                Your team name will be stamped on your ticked stages
               </p>
             </div>
 
             {/* Quick Name Buttons */}
             <div className="grid grid-cols-2 gap-2">
-              {commonTechnicians.map((name) => (
+              {detectedTeam && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTechnicianName(detectedTeam);
+                    setCustomName('');
+                  }}
+                  className={`col-span-2 py-2 px-3 rounded-xl text-xs font-bold border transition-all text-center ${
+                    technicianName === detectedTeam && !customName
+                      ? 'bg-emerald-600 border-emerald-400 text-white shadow-sm ring-1 ring-emerald-400'
+                      : 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  ✓ Continue as {detectedTeam}
+                </button>
+              )}
+              {['Gazi', 'Lindani', 'Fani', 'Phumlani'].map((name) => (
                 <button
                   key={name}
                   type="button"
                   onClick={() => {
-                    setTechnicianName(name);
+                    const fullName = detectedTeam ? `${detectedTeam} / ${name}` : name;
+                    setTechnicianName(fullName);
                     setCustomName('');
                   }}
                   className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all text-center ${
-                    technicianName === name && !customName
+                    (technicianName === name || technicianName === `${detectedTeam} / ${name}`) && !customName
                       ? 'bg-sky-600 border-sky-400 text-white shadow-sm ring-1 ring-sky-400'
                       : 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700'
                   }`}
                 >
-                  {name}
+                  {detectedTeam ? `${detectedTeam} / ${name}` : name}
                 </button>
               ))}
             </div>
@@ -288,21 +310,21 @@ export function LockScreen({ onAuthenticated }: LockScreenProps) {
             {/* Access Role Reference Hints */}
             <div className="pt-2 border-t border-slate-800/80 space-y-1.5 text-[11px] text-slate-400">
               <div className="flex items-center gap-2">
-                <Shield className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                <HardHat className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
                 <span>
-                  <strong className="text-slate-200">Admin:</strong> Full control, unlock & sync
+                  <strong className="text-slate-200">Teams 1 to 10:</strong> PINs 1001 – 1010 (or team1 – team10)
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <Briefcase className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
                 <span>
-                  <strong className="text-slate-200">Staff PIN:</strong> Full site task access
+                  <strong className="text-slate-200">Guest:</strong> PIN 1122 (or password &quot;guest&quot;)
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <HardHat className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                <Shield className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
                 <span>
-                  <strong className="text-slate-200">Contractor PIN:</strong> Assigned subprojects
+                  <strong className="text-slate-200">Admin:</strong> Master PIN 9824 / Password
                 </span>
               </div>
             </div>

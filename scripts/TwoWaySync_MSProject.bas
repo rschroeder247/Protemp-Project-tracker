@@ -165,7 +165,14 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     
     ' 2. Ensure all tasks and subprojects are expanded so XML export captures full subproject trees
     On Error Resume Next
-    activeProj.OutlineShowAllTasks
+    Application.SelectAll
+    Application.OutlineShowAllTasks
+    Dim subp As Object
+    For Each subp In activeProj.Subprojects
+        If Not subp Is Nothing Then
+            subp.SourceProject.OutlineShowAllTasks
+        End If
+    Next subp
     On Error GoTo EH
     
     ' 3. Suppress overwrite dialog so saving is completely seamless
@@ -241,7 +248,14 @@ Public Sub SaveMasterAndExportXml()
     
     ' 4. Expand all subprojects for complete export
     On Error Resume Next
-    Application.ActiveProject.OutlineShowAllTasks
+    Application.SelectAll
+    Application.OutlineShowAllTasks
+    Dim subp2 As Object
+    For Each subp2 In Application.ActiveProject.Subprojects
+        If Not subp2 Is Nothing Then
+            subp2.SourceProject.OutlineShowAllTasks
+        End If
+    Next subp2
     On Error GoTo EH
     
     ' 5. Export XML copy

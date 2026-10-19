@@ -87,9 +87,11 @@ export async function POST(req: NextRequest) {
     // 3. Parse MS Project XML
     const parsed = parseMsProjectXml(content);
 
-    if (!parsed.tasks || parsed.tasks.length === 0) {
+    if (!parsed.tasks || parsed.tasks.length < 5) {
       return NextResponse.json(
-        { error: 'No tasks found in project XML from OneDrive' },
+        {
+          error: `MS Project XML contains only ${parsed.tasks?.length || 0} tasks. Subprojects appear to be collapsed in MS Project. Please expand all subprojects and re-save Master Project.xml.`,
+        },
         { status: 400 }
       );
     }

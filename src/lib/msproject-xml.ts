@@ -50,8 +50,11 @@ function extractTasksFromXmlProject(
       ).trim();
 
       const spId = subprojName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      const isSiteInstallation =
-        spId.includes('site-installation') || spId.includes('e-i');
+      // Only the original AVI Line 4 Site Installation retains bare task_${uid} for legacy progress records.
+      // All other subprojects (e.g. P7340, Instrument Connection Plan) get namespaced IDs to prevent collisions.
+      const isOriginalSiteInstallation =
+        spId === 'avi-line-4---e-i-site-installation--jb-panels---motor-cabling-' ||
+        (spId.includes('site-installation') && !spId.includes('p7340'));
 
       // 1. Add Tier 1 Subproject Container (OutlineLevel = 1)
       tasks.push({
@@ -91,9 +94,9 @@ function extractTasksFromXmlProject(
           const quotedHours = parseIsoDurationToHours(workStr);
           const percentComplete = parseInt(t.PercentComplete || '0', 10);
 
-          // Preserve exact task_${uid} for Site Installation so existing DB progress records match,
+          // Preserve exact task_${uid} for original Site Installation so existing DB progress records match,
           // while prefixing other subprojects to avoid UID collisions.
-          const taskId = isSiteInstallation
+          const taskId = isOriginalSiteInstallation
             ? `task_${uid}`
             : `task_${spId.substring(0, 8)}_${uid}`;
 

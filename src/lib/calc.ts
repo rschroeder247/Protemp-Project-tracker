@@ -80,27 +80,47 @@ export function calculateTreeStats(
  * Groups flat tasks with WBS or outline levels into a nested tree structure.
  */
 export function buildTaskTree(flatTasks: TaskNode[]): TaskNode[] {
-  const rootNodes: TaskNode[] = [];
-  const stack: TaskNode[] = [];
+  // Group by projectId first to prevent tasks from different subprojects leaking into each other
+  const projectOrder: string[] = [];
+  const tasksByProject = new Map<string, TaskNode[]>();
 
   for (const task of flatTasks) {
-    const node: TaskNode = { ...task, children: [] };
+    const pId = task.projectId || task.subprojectName || 'default';
+    if (!tasksByProject.has(pId)) {
+      tasksByProject.set(pId, []);
+      projectOrder.push(pId);
+    }
+    tasksByProject.get(pId)!.push(task);
+  }
 
-    while (stack.length > 0 && stack[stack.length - 1].outlineLevel >= node.outlineLevel) {
-      stack.pop();
+  const rootNodes: TaskNode[] = [];
+
+  for (const pId of projectOrder) {
+    const projTasks = tasksByProject.get(pId)!;
+    const stack: TaskNode[] = [];
+    const projRoots: TaskNode[] = [];
+
+    for (const task of projTasks) {
+      const node: TaskNode = { ...task, children: [] };
+
+      while (stack.length > 0 && stack[stack.length - 1].outlineLevel >= node.outlineLevel) {
+        stack.pop();
+      }
+
+      if (stack.length === 0) {
+        projRoots.push(node);
+      } else {
+        const parent = stack[stack.length - 1];
+        if (!parent.children) parent.children = [];
+        parent.children.push(node);
+      }
+
+      if (node.isSummary) {
+        stack.push(node);
+      }
     }
 
-    if (stack.length === 0) {
-      rootNodes.push(node);
-    } else {
-      const parent = stack[stack.length - 1];
-      if (!parent.children) parent.children = [];
-      parent.children.push(node);
-    }
-
-    if (node.isSummary) {
-      stack.push(node);
-    }
+    rootNodes.push(...projRoots);
   }
 
   return rootNodes;

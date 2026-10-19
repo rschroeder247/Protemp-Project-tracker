@@ -161,12 +161,33 @@ export function ReportsClient({
   // Available selectable projects (filtered by contractor access if needed)
   const availableProjects = useMemo(() => {
     const distinctProjectIds = Array.from(new Set(dbTasks.map((t) => t.project_id))).filter(Boolean);
-    let allowedIds = distinctProjectIds;
-    if (role === 'contractor' && allowedSubprojects.length > 0) {
-      const allowedSet = new Set(allowedSubprojects);
-      allowedIds = distinctProjectIds.filter((pid) => allowedSet.has(pid));
+    if (role === 'owner') {
+      return distinctProjectIds.map((pid) => ({
+        id: pid,
+        name: projectMap.get(pid) || pid,
+      }));
     }
 
+    if (!allowedSubprojects || allowedSubprojects.length === 0 || allowedSubprojects.includes('__ALL__')) {
+      return distinctProjectIds.map((pid) => ({
+        id: pid,
+        name: projectMap.get(pid) || pid,
+      }));
+    }
+
+    if (allowedSubprojects.includes('__NONE__')) {
+      return [];
+    }
+
+    const allowedSet = new Set(allowedSubprojects);
+    const matchedProjectIds = new Set<string>();
+    for (const t of dbTasks) {
+      if (allowedSet.has(t.id) || allowedSet.has(t.project_id)) {
+        matchedProjectIds.add(t.project_id);
+      }
+    }
+
+    const allowedIds = distinctProjectIds.filter((pid) => matchedProjectIds.has(pid));
     return allowedIds.map((pid) => ({
       id: pid,
       name: projectMap.get(pid) || pid,
@@ -175,14 +196,31 @@ export function ReportsClient({
 
   // Filter tasks and progress by selected project
   const filteredTasks = useMemo(() => {
-    if (selectedProjectId === 'all') {
-      if (role === 'contractor' && allowedSubprojects.length > 0) {
-        const allowedSet = new Set(allowedSubprojects);
-        return dbTasks.filter((t) => allowedSet.has(t.project_id));
-      }
-      return dbTasks;
+    if (role === 'owner') {
+      if (selectedProjectId === 'all') return dbTasks;
+      return dbTasks.filter((t) => t.project_id === selectedProjectId);
     }
-    return dbTasks.filter((t) => t.project_id === selectedProjectId);
+
+    if (allowedSubprojects.includes('__NONE__')) {
+      return [];
+    }
+
+    let baseTasks = dbTasks;
+    if (allowedSubprojects.length > 0 && !allowedSubprojects.includes('__ALL__')) {
+      const allowedSet = new Set(allowedSubprojects);
+      const matchedProjectIds = new Set<string>();
+      for (const t of dbTasks) {
+        if (allowedSet.has(t.id) || allowedSet.has(t.project_id)) {
+          matchedProjectIds.add(t.project_id);
+        }
+      }
+      baseTasks = dbTasks.filter((t) => matchedProjectIds.has(t.project_id));
+    }
+
+    if (selectedProjectId !== 'all') {
+      return baseTasks.filter((t) => t.project_id === selectedProjectId);
+    }
+    return baseTasks;
   }, [dbTasks, selectedProjectId, role, allowedSubprojects]);
 
   const taskLookup = useMemo(() => {
@@ -194,15 +232,35 @@ export function ReportsClient({
   }, [filteredTasks]);
 
   const filteredProgress = useMemo(() => {
+    if (role === 'owner') {
+      let list = dbProgress;
+      if (selectedProjectId !== 'all') {
+        list = list.filter((p) => p.project_id === selectedProjectId);
+      }
+      return list;
+    }
+
+    if (allowedSubprojects.includes('__NONE__')) {
+      return [];
+    }
+
     let list = dbProgress;
+    if (allowedSubprojects.length > 0 && !allowedSubprojects.includes('__ALL__')) {
+      const allowedSet = new Set(allowedSubprojects);
+      const matchedProjectIds = new Set<string>();
+      for (const t of dbTasks) {
+        if (allowedSet.has(t.id) || allowedSet.has(t.project_id)) {
+          matchedProjectIds.add(t.project_id);
+        }
+      }
+      list = list.filter((p) => matchedProjectIds.has(p.project_id));
+    }
+
     if (selectedProjectId !== 'all') {
       list = list.filter((p) => p.project_id === selectedProjectId);
-    } else if (role === 'contractor' && allowedSubprojects.length > 0) {
-      const allowedSet = new Set(allowedSubprojects);
-      list = list.filter((p) => allowedSet.has(p.project_id));
     }
     return list;
-  }, [dbProgress, selectedProjectId, role, allowedSubprojects]);
+  }, [dbProgress, selectedProjectId, role, allowedSubprojects, dbTasks]);
 
   // Overall Project KPIs
   const totalLeafTasks = useMemo(() => {

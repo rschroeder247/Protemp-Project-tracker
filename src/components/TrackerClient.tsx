@@ -173,17 +173,20 @@ export function TrackerClient({
     }
   };
 
-  const handleSaveContractorAllowed = async (newAllowed: string[]) => {
+  const handleSaveContractorAllowed = async (data: {
+    allowedSubprojects: string[];
+    teamAllowedSubprojects: Record<string, string[]>;
+  }) => {
     const res = await fetch('/api/auth/contractor-access', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowedSubprojects: newAllowed }),
+      body: JSON.stringify(data),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.error || 'Failed to save contractor access');
+      throw new Error(err.error || 'Failed to save team project allocations');
     }
-    setAllowedSubprojects(newAllowed);
+    setAllowedSubprojects(data.allowedSubprojects);
   };
 
   // 3-Tier Navigation State
@@ -398,11 +401,22 @@ export function TrackerClient({
     return buildTaskTree(flatNodes);
   }, [dbTasks, dbProgress]);
 
-  // Filter subprojects if contractor has restricted access
+  // Filter subprojects if team or contractor has restricted access
   const visibleTasks = useMemo(() => {
-    if (role !== 'contractor' || allowedSubprojects.length === 0) {
+    // Admin always sees all projects
+    if (role === 'owner') {
       return allTasks;
     }
+    if (!allowedSubprojects || allowedSubprojects.length === 0) {
+      return allTasks;
+    }
+    if (allowedSubprojects.includes('__ALL__')) {
+      return allTasks;
+    }
+    if (allowedSubprojects.includes('__NONE__')) {
+      return [];
+    }
+
     const allowedSet = new Set(allowedSubprojects);
 
     return allTasks
@@ -955,20 +969,34 @@ export function TrackerClient({
       )}
 
       <main className="max-w-3xl mx-auto px-4 mt-2">
-        {/* Dynamic Summary Tiles for the currently active Tier view */}
-        <SummaryTiles
-          completedItems={stats.completedLeafTasks}
-          totalItems={stats.totalLeafTasks}
-          completedStages={stats.completedLeafTasks}
-          totalStages={stats.totalLeafTasks}
-          workPct={stats.taskPct}
-          earnedHours={stats.earnedHours}
-          quotedHours={stats.totalQuotedHours}
-          completedPanels={stats.completedPanels}
-          totalPanels={stats.totalPanels}
-        />
+        {visibleTasks.length === 0 && role !== 'owner' ? (
+          <div className="bg-surface-light dark:bg-surface-dark border border-purple-500/30 rounded-2xl p-10 text-center shadow-xs my-8 space-y-3">
+            <div className="w-14 h-14 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto border border-purple-500/20">
+              <Users className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-bold text-fg-light dark:text-fg-dark">
+              No Projects Allocated
+            </h3>
+            <p className="text-xs text-muted-light dark:text-muted-dark max-w-md mx-auto">
+              No projects or subprojects are currently allocated to {userName || 'your team'}. Please contact Roland (Admin) to assign projects to your team.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Dynamic Summary Tiles for the currently active Tier view */}
+            <SummaryTiles
+              completedItems={stats.completedLeafTasks}
+              totalItems={stats.totalLeafTasks}
+              completedStages={stats.completedLeafTasks}
+              totalStages={stats.totalLeafTasks}
+              workPct={stats.taskPct}
+              earnedHours={stats.earnedHours}
+              quotedHours={stats.totalQuotedHours}
+              completedPanels={stats.completedPanels}
+              totalPanels={stats.totalPanels}
+            />
 
-        <div className="mt-4">
+            <div className="mt-4">
           {/* Action Toolbar: Search & Minimize All Controls */}
           <div className="bg-surface-light dark:bg-surface-dark border border-line-light dark:border-line-dark rounded-xl p-3 mb-3 shadow-xs space-y-2">
             <div className="flex items-center gap-2">
@@ -1218,6 +1246,8 @@ export function TrackerClient({
             />
           )}
         </div>
+      </>
+    )}
       </main>
 
       <SaveBar

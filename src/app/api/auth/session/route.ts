@@ -22,15 +22,37 @@ export async function GET(req: NextRequest) {
     }
 
     let allowedSubprojects: string[] = [];
-    if (session.role === 'contractor') {
-      const { data } = await supabase
+    if (session.role === 'contractor' || session.role === 'viewer') {
+      const { data: teamSetting } = await supabase
         .from('tracker_app_settings')
         .select('value')
-        .eq('key', 'contractor_allowed_subprojects')
-        .single();
+        .eq('key', 'team_allowed_subprojects')
+        .maybeSingle();
 
-      if (data && Array.isArray(data.value)) {
-        allowedSubprojects = data.value;
+      const teamMap =
+        teamSetting?.value &&
+        typeof teamSetting.value === 'object' &&
+        !Array.isArray(teamSetting.value)
+          ? (teamSetting.value as Record<string, string[]>)
+          : null;
+
+      const teamKey = session.teamId || 'guest';
+      if (teamMap && teamKey in teamMap) {
+        const teamAlloc = teamMap[teamKey];
+        if (Array.isArray(teamAlloc)) {
+          allowedSubprojects = teamAlloc.length === 0 ? ['__NONE__'] : teamAlloc;
+        }
+      } else {
+        // Fallback to global contractor setting
+        const { data: globalSetting } = await supabase
+          .from('tracker_app_settings')
+          .select('value')
+          .eq('key', 'contractor_allowed_subprojects')
+          .maybeSingle();
+
+        if (globalSetting && Array.isArray(globalSetting.value)) {
+          allowedSubprojects = globalSetting.value;
+        }
       }
     }
 

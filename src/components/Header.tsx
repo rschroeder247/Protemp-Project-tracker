@@ -17,6 +17,7 @@ import {
   Upload,
   Box,
   TrendingUp,
+  Users,
 } from 'lucide-react';
 import { UserRole } from '@/lib/types';
 
@@ -127,16 +128,17 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
 
-            {/* Admin: Contractor Access Management Button */}
+            {/* Admin: Team Project Allocation Management Button */}
             {role === 'owner' && onOpenContractorAccess && (
               <button
                 type="button"
                 onClick={onOpenContractorAccess}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-400/30 transition-colors"
-                title="Manage which subprojects contractors can access"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-400/30 transition-colors shadow-xs"
+                title="Allocate projects to Team 1 through 10"
               >
-                <HardHat className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Contractor Access</span>
+                <Users className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Allocate Projects</span>
+                <span className="sm:hidden">Allocations</span>
               </button>
             )}
 

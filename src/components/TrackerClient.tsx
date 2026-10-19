@@ -870,7 +870,11 @@ export function TrackerClient({
       {/* 3-Tier Navigation Header */}
       <Header
         title="Project Monitoring"
-        subtitle="MS Project Master & Linked Subprojects"
+        subtitle={
+          activeSubprojectNode
+            ? activeSubprojectNode.name
+            : 'MS Project Master & Linked Subprojects'
+        }
         role={role}
         userName={userName}
         isOffline={isOffline}

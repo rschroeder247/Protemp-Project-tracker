@@ -194,6 +194,54 @@ export function ReportsClient({
     }));
   }, [dbTasks, role, allowedSubprojects, projectMap]);
 
+  // Tier 1 Subprojects with calculated completion % and task counts
+  const tier1Subprojects = useMemo(() => {
+    const totalLeafCount = dbTasks.filter((t) => !t.is_summary).length;
+    const totalCompleted = dbProgress.length;
+    const totalPct = totalLeafCount > 0 ? Math.round((totalCompleted / totalLeafCount) * 100) : 0;
+
+    const list: Array<{
+      id: string;
+      name: string;
+      shortName: string;
+      totalTasks: number;
+      completedTasks: number;
+      pct: number;
+    }> = [
+      {
+        id: 'all',
+        name: 'Overview (All Subprojects)',
+        shortName: 'Overview (All)',
+        totalTasks: totalLeafCount,
+        completedTasks: totalCompleted,
+        pct: totalPct,
+      },
+    ];
+
+    for (const proj of availableProjects) {
+      const projTasks = dbTasks.filter((t) => t.project_id === proj.id && !t.is_summary);
+      const projProgress = dbProgress.filter((p) => p.project_id === proj.id);
+      const total = projTasks.length;
+      const completed = projProgress.length;
+      const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+      list.push({
+        id: proj.id,
+        name: proj.name,
+        shortName: cleanProjectName(proj.name),
+        totalTasks: total,
+        completedTasks: completed,
+        pct,
+      });
+    }
+
+    return list;
+  }, [availableProjects, dbTasks, dbProgress]);
+
+  const activeSubproject = useMemo(() => {
+    return tier1Subprojects.find((sp) => sp.id === selectedProjectId) || null;
+  }, [tier1Subprojects, selectedProjectId]);
+
   // Filter tasks and progress by selected project
   const filteredTasks = useMemo(() => {
     if (role === 'owner') {
@@ -703,7 +751,11 @@ export function ReportsClient({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `protemp_progress_trend_${timeframe}_${selectedProjectId}.csv`);
+    const subprojSlug =
+      selectedProjectId === 'all'
+        ? 'All_Subprojects'
+        : (activeSubproject?.shortName || selectedProjectId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    link.setAttribute('download', `protemp_progress_trend_${timeframe}_${subprojSlug}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -827,46 +879,52 @@ export function ReportsClient({
             </div>
           </div>
 
-          {/* Filter Bar: Project Selection & Timeframe */}
-          <div className="mt-3 pt-2.5 border-t border-line-light/60 dark:border-line-dark/60 flex items-center justify-between gap-3 flex-wrap">
-            {/* Project Selector */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[11px] font-bold tracking-wider uppercase text-muted-light dark:text-muted-dark flex items-center gap-1">
-                <FolderTree className="w-3.5 h-3.5 text-accent-light dark:text-accent-dark" />
-                Project:
-              </span>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setSelectedProjectId('all')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                    selectedProjectId === 'all'
-                      ? 'bg-accent-light text-white dark:bg-accent-dark dark:text-slate-900 shadow-xs'
-                      : 'bg-slate-100 dark:bg-slate-800 text-muted-light dark:text-muted-dark hover:bg-slate-200 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  All Projects (Master)
-                </button>
-                {availableProjects.map((proj) => {
-                  const isActive = selectedProjectId === proj.id;
+          {/* Tier 1: Subprojects Filter Navigation */}
+          {tier1Subprojects.length > 0 && (
+            <div className="mt-3 pt-2.5 border-t border-line-light/60 dark:border-line-dark/60">
+              <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                <span className="text-[11px] font-bold tracking-wider uppercase text-muted-light dark:text-muted-dark flex items-center gap-1.5">
+                  <FolderTree className="w-3.5 h-3.5 text-accent-light dark:text-accent-dark" />
+                  Tier 1 &middot; Subprojects
+                </span>
+                <span className="text-[11px] text-muted-light dark:text-muted-dark">
+                  {tier1Subprojects.length - 1} {tier1Subprojects.length - 1 === 1 ? 'subproject' : 'subprojects'} available
+                </span>
+              </div>
+              <div className="flex space-x-2 overflow-x-auto no-scrollbar pb-1">
+                {tier1Subprojects.map((sp) => {
+                  const isActive = selectedProjectId === sp.id;
                   return (
                     <button
-                      key={proj.id}
+                      key={sp.id}
                       type="button"
-                      onClick={() => setSelectedProjectId(proj.id)}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                      onClick={() => setSelectedProjectId(sp.id)}
+                      className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer ${
                         isActive
-                          ? 'bg-accent-light text-white dark:bg-accent-dark dark:text-slate-900 shadow-xs'
-                          : 'bg-slate-100 dark:bg-slate-800 text-muted-light dark:text-muted-dark hover:bg-slate-200 dark:hover:bg-slate-700'
+                          ? 'bg-accent-light text-white dark:bg-accent-dark dark:text-slate-900 shadow-sm ring-1 ring-accent-light dark:ring-accent-dark'
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border border-line-light/60 dark:border-line-dark/60'
                       }`}
+                      title={`${sp.name} — ${sp.completedTasks} of ${sp.totalTasks} stages completed (${sp.pct}%)`}
                     >
-                      {proj.name}
+                      <span className="truncate max-w-[260px] sm:max-w-none">{sp.shortName}</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                          isActive
+                            ? 'bg-white/20 text-white dark:bg-slate-900/20 dark:text-slate-900'
+                            : 'bg-slate-200 dark:bg-slate-700 text-fg-light dark:text-fg-dark'
+                        }`}
+                      >
+                        {sp.pct}%
+                      </span>
                     </button>
                   );
                 })}
               </div>
             </div>
+          )}
 
+          {/* Timeframe & Team Controls Toolbar */}
+          <div className="mt-2.5 pt-2 border-t border-line-light/40 dark:border-line-dark/40 flex items-center justify-between gap-3 flex-wrap">
             {/* Timeframe Selector (Last Worked Day / 1 Week / 1 Month / All Time) */}
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-lg border border-line-light dark:border-line-dark text-xs">
               <button
@@ -960,6 +1018,27 @@ export function ReportsClient({
           </div>
         </div>
       </header>
+
+      {/* Active Tier 1 Subproject Filter Banner */}
+      {selectedProjectId !== 'all' && (
+        <div className="max-w-5xl mx-auto px-4 mt-3">
+          <div className="flex items-center justify-between text-xs px-3.5 py-2.5 bg-accent-light/10 dark:bg-accent-dark/15 border border-accent-light/30 dark:border-accent-dark/40 rounded-xl text-accent-light dark:text-accent-dark shadow-xs">
+            <span className="flex items-center gap-2 font-medium">
+              <FolderTree className="w-4 h-4 text-accent-light dark:text-accent-dark flex-shrink-0" />
+              <span>
+                Trends filtered to <strong>Tier 1 &middot; Subproject</strong>: <strong>{activeSubproject?.shortName || selectedProjectId}</strong> ({filteredTasks.filter((t) => !t.is_summary).length} stages, {overallTaskPct.toFixed(1)}% complete)
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedProjectId('all')}
+              className="text-xs font-bold underline hover:opacity-80 cursor-pointer ml-3 whitespace-nowrap"
+            >
+              Show All Subprojects
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Active Team Filter Banner on Reports */}
       {selectedTeamFilter !== 'all' && (
@@ -1318,8 +1397,8 @@ export function ReportsClient({
               <h3 className="text-sm font-bold text-fg-light dark:text-fg-dark flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-accent-light dark:text-accent-dark" />
                 {timeframe === '1d'
-                  ? `Hourly Scale of Last Worked Day (${lastWorkedDayScale?.shortDate || 'Recent Day'})`
-                  : `Daily Progress Trend (${timeframe === '7d' ? 'Last 7 Days' : timeframe === '30d' ? 'Last 30 Days' : 'All Time'})`}
+                  ? `Hourly Scale of Last Worked Day (${lastWorkedDayScale?.shortDate || 'Recent Day'})${selectedProjectId !== 'all' ? ` — ${activeSubproject?.shortName}` : ''}`
+                  : `Daily Progress Trend (${timeframe === '7d' ? 'Last 7 Days' : timeframe === '30d' ? 'Last 30 Days' : 'All Time'})${selectedProjectId !== 'all' ? ` — ${activeSubproject?.shortName}` : ''}`}
               </h3>
               <p className="text-[11px] text-muted-light dark:text-muted-dark">
                 {timeframe === '1d'
@@ -1637,7 +1716,7 @@ export function ReportsClient({
               <div>
                 <h3 className="text-sm font-bold text-fg-light dark:text-fg-dark flex items-center gap-1.5">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  Cumulative Growth Trend
+                  Cumulative Growth Trend{selectedProjectId !== 'all' ? ` — ${activeSubproject?.shortName}` : ''}
                 </h3>
                 <p className="text-[11px] text-muted-light dark:text-muted-dark">
                   Overall progress accumulation curve

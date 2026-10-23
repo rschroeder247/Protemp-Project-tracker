@@ -28,8 +28,10 @@ import {
   Gauge,
   Timer,
   Activity,
+  Upload,
 } from 'lucide-react';
 import { LockScreen } from '@/components/LockScreen';
+import { AdminBackupRestoreModal } from '@/components/AdminBackupRestoreModal';
 import { UserRole } from '@/lib/types';
 import { supabase } from '@/lib/supabase';
 import { parsePersons, consolidateTeamName, matchesPersonOrTeam } from '@/lib/nameNormalizer';
@@ -64,6 +66,10 @@ export function ReportsClient({
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [teamViewMode, setTeamViewMode] = useState<'individual' | 'crews'>('individual');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
+
+  // Admin Backup & Restore Modal State
+  const [isBackupRestoreModalOpen, setIsBackupRestoreModalOpen] = useState(false);
+  const [backupRestoreInitialTab, setBackupRestoreInitialTab] = useState<'backup' | 'restore'>('backup');
 
   // Live state
   const [dbTasks, setDbTasks] = useState<any[]>(initialDbTasks);
@@ -132,6 +138,39 @@ export function ReportsClient({
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  // Admin Direct Backup to CSV
+  const handleDirectBackupDownload = async () => {
+    try {
+      const res = await fetch('/api/backup-progress');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Backup download failed');
+      }
+      const disposition = res.headers.get('content-disposition') || '';
+      let filename = 'protemp_site_backup.csv';
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match && match[1]) filename = match[1];
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Backup download failed: ${e.message}`);
+    }
+  };
+
+  // Open Restore Modal
+  const handleOpenRestore = () => {
+    setBackupRestoreInitialTab('restore');
+    setIsBackupRestoreModalOpen(true);
   };
 
   // Helper to get friendly project names
@@ -870,12 +909,38 @@ export function ReportsClient({
               <button
                 type="button"
                 onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-fg-light dark:text-fg-dark border border-line-light dark:border-line-dark transition-colors"
                 title="Print or Save as PDF"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Print Report</span>
               </button>
+
+              {/* Admin: Backup & Restore to CSV Buttons */}
+              {role === 'owner' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleDirectBackupDownload}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-400/30 transition-colors cursor-pointer shadow-xs"
+                    title="Download complete CSV backup of all progress data"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Backup CSV</span>
+                    <span className="sm:hidden">Backup</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenRestore}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-400/30 transition-colors cursor-pointer shadow-xs"
+                    title="Restore progress data from a CSV backup file"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Restore CSV</span>
+                    <span className="sm:hidden">Restore</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -2041,6 +2106,19 @@ export function ReportsClient({
           </div>
         </div>
       </main>
+
+      {/* Admin Backup & Restore Modal */}
+      {role === 'owner' && (
+        <AdminBackupRestoreModal
+          isOpen={isBackupRestoreModalOpen}
+          onClose={() => setIsBackupRestoreModalOpen(false)}
+          onRestoreSuccess={async () => {
+            await handleRefresh();
+          }}
+          currentCompletedCount={dbProgress.length}
+          initialTab={backupRestoreInitialTab}
+        />
+      )}
     </div>
   );
 }

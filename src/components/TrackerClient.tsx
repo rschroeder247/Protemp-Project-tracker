@@ -8,6 +8,7 @@ import { SaveBar } from '@/components/SaveBar';
 import { SyncModal } from '@/components/SyncModal';
 import { LockScreen } from '@/components/LockScreen';
 import { ContractorAccessModal } from '@/components/ContractorAccessModal';
+import { AdminBackupRestoreModal } from '@/components/AdminBackupRestoreModal';
 import { TaskNode, UserRole } from '@/lib/types';
 import {
   calculateTreeStats,
@@ -53,8 +54,10 @@ export function TrackerClient({
   const [userName, setUserName] = useState<string>('Roland (Admin)');
   const [allowedSubprojects, setAllowedSubprojects] = useState<string[]>([]);
 
-  // Modals for Security
+  // Modals for Security & Backup
   const [isContractorModalOpen, setIsContractorModalOpen] = useState(false);
+  const [isBackupRestoreModalOpen, setIsBackupRestoreModalOpen] = useState(false);
+  const [backupRestoreInitialTab, setBackupRestoreInitialTab] = useState<'backup' | 'restore'>('backup');
   const [isElevateModalOpen, setIsElevateModalOpen] = useState(false);
   const [elevatePassword, setElevatePassword] = useState('');
   const [elevateError, setElevateError] = useState<string | null>(null);
@@ -187,6 +190,39 @@ export function TrackerClient({
       throw new Error(err.error || 'Failed to save team project allocations');
     }
     setAllowedSubprojects(data.allowedSubprojects);
+  };
+
+  // Admin Direct Backup to CSV
+  const handleDirectBackupDownload = async () => {
+    try {
+      const res = await fetch('/api/backup-progress');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Backup download failed');
+      }
+      const disposition = res.headers.get('content-disposition') || '';
+      let filename = 'protemp_site_backup.csv';
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match && match[1]) filename = match[1];
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Backup download failed: ${e.message}`);
+    }
+  };
+
+  // Open Restore Modal
+  const handleOpenRestore = () => {
+    setBackupRestoreInitialTab('restore');
+    setIsBackupRestoreModalOpen(true);
   };
 
   // 3-Tier Navigation State
@@ -908,6 +944,8 @@ export function TrackerClient({
         onToggleSearch={handleToggleSearch}
         isSearchOpen={isSearchOpen}
         onOpenContractorAccess={() => setIsContractorModalOpen(true)}
+        onOpenBackup={handleDirectBackupDownload}
+        onOpenRestore={handleOpenRestore}
         onElevateAdmin={() => setIsElevateModalOpen(true)}
         onLogout={handleLogout}
         subprojects={tier1Subprojects}
@@ -1275,6 +1313,19 @@ export function TrackerClient({
         initialAllowed={allowedSubprojects}
         onSaveAllowed={handleSaveContractorAllowed}
       />
+
+      {/* Admin Backup & Restore to CSV Modal (Admin only) */}
+      {role === 'owner' && (
+        <AdminBackupRestoreModal
+          isOpen={isBackupRestoreModalOpen}
+          onClose={() => setIsBackupRestoreModalOpen(false)}
+          onRestoreSuccess={async () => {
+            await refreshData();
+          }}
+          currentCompletedCount={dbProgress.length}
+          initialTab={backupRestoreInitialTab}
+        />
+      )}
 
       {/* Admin Elevation Modal */}
       {isElevateModalOpen && (

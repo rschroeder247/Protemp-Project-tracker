@@ -18,6 +18,8 @@ import {
   Box,
   TrendingUp,
   Users,
+  Download,
+  Database,
 } from 'lucide-react';
 import { UserRole } from '@/lib/types';
 
@@ -41,6 +43,8 @@ interface HeaderProps {
   onToggleSearch?: () => void;
   isSearchOpen?: boolean;
   onOpenContractorAccess?: () => void;
+  onOpenBackup?: () => void;
+  onOpenRestore?: () => void;
   onElevateAdmin?: () => void;
   onLogout?: () => void;
 
@@ -73,6 +77,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSearch,
   isSearchOpen = false,
   onOpenContractorAccess,
+  onOpenBackup,
+  onOpenRestore,
   onElevateAdmin,
   onLogout,
   subprojects,
@@ -139,6 +145,34 @@ export const Header: React.FC<HeaderProps> = ({
                 <Users className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Allocate Projects</span>
                 <span className="sm:hidden">Allocations</span>
+              </button>
+            )}
+
+            {/* Admin: Backup Progress to CSV Button */}
+            {role === 'owner' && onOpenBackup && (
+              <button
+                type="button"
+                onClick={onOpenBackup}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-400/30 transition-colors shadow-xs cursor-pointer"
+                title="Download full CSV backup of all progress data"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Backup CSV</span>
+                <span className="sm:hidden">Backup</span>
+              </button>
+            )}
+
+            {/* Admin: Restore Progress from CSV Button */}
+            {role === 'owner' && onOpenRestore && (
+              <button
+                type="button"
+                onClick={onOpenRestore}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-700 dark:text-purple-400 hover:bg-purple-500/20 border border-purple-400/30 transition-colors shadow-xs cursor-pointer"
+                title="Restore progress data from a CSV backup file"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Restore CSV</span>
+                <span className="sm:hidden">Restore</span>
               </button>
             )}
 

@@ -1323,6 +1323,7 @@ export function TrackerClient({
             await refreshData();
           }}
           currentCompletedCount={dbProgress.length}
+          totalTasksCount={dbTasks.length}
           initialTab={backupRestoreInitialTab}
         />
       )}

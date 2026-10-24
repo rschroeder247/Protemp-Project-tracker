@@ -21,6 +21,7 @@ interface AdminBackupRestoreModalProps {
   onClose: () => void;
   onRestoreSuccess: () => Promise<void> | void;
   currentCompletedCount?: number;
+  totalTasksCount?: number;
   initialTab?: 'backup' | 'restore';
 }
 
@@ -29,6 +30,7 @@ export function AdminBackupRestoreModal({
   onClose,
   onRestoreSuccess,
   currentCompletedCount = 0,
+  totalTasksCount = 3961,
   initialTab = 'backup',
 }: AdminBackupRestoreModalProps) {
   const [activeTab, setActiveTab] = useState<'backup' | 'restore'>(initialTab);
@@ -39,6 +41,7 @@ export function AdminBackupRestoreModal({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<{
     totalRows: number;
+    completedRows: number;
     detectedTechs: string[];
     sampleTasks: string[];
   } | null>(null);
@@ -113,16 +116,26 @@ export function AdminBackupRestoreModal({
 
       const techs = new Set<string>();
       const samples: string[] = [];
+      let completedCount = 0;
 
       for (const r of rows) {
         const tech = r.donebyname || r.done_by_name || r.doneby || r.technician;
         if (tech) techs.add(tech);
-        const taskName = r.taskname || r.task_name || r.task;
+        const statusVal = (r.status || '').toLowerCase();
+        const pctVal = r.percentcomplete || r.percent_complete || '';
+        const hasStatusColumn = 'status' in r || 'percentcomplete' in r || 'percent_complete' in r;
+        const isRowDone = hasStatusColumn
+          ? statusVal === 'completed' || pctVal === '100' || Boolean(tech)
+          : true;
+        if (isRowDone) completedCount++;
+
+        const taskName = r.taskname || r.task_name || r.task || r.name;
         if (taskName && samples.length < 3) samples.push(taskName);
       }
 
       setFilePreview({
         totalRows: rows.length,
+        completedRows: completedCount,
         detectedTechs: Array.from(techs).slice(0, 6),
         sampleTasks: samples,
       });
@@ -236,20 +249,25 @@ export function AdminBackupRestoreModal({
             /* BACKUP SECTION */
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-line-light dark:border-line-dark space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="text-xs font-semibold text-fg-light dark:text-fg-dark">
                     Current Database State:
                   </span>
-                  <span className="px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
-                    {currentCompletedCount} Completed Stages
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20">
+                      {totalTasksCount.toLocaleString()} Total Tasks
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-xs font-bold font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                      {currentCompletedCount.toLocaleString()} Completed
+                    </span>
+                  </div>
                 </div>
                 <p className="text-xs text-muted-light dark:text-muted-dark leading-relaxed">
-                  The backup creates an archive of all recorded task completions. It includes Task IDs, WBS numbers, task names, subproject associations, technician names, and completion timestamps.
+                  The backup exports a complete archive of all {totalTasksCount.toLocaleString()} project tasks (headings, pending tasks, and completed stages). It includes Task IDs, WBS hierarchy, quoted hours, subproject associations, completion status, technician names, and timestamps.
                 </p>
                 <div className="flex items-center gap-2 text-[11px] text-muted-light dark:text-muted-dark font-mono bg-surface-light dark:bg-surface-dark p-2 rounded-lg border border-line-light/50 dark:border-line-dark/50">
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                  <span>Format: UTF-8 CSV (Compatible with Microsoft Excel &amp; Restore tool)</span>
+                  <span>Format: UTF-8 CSV ({totalTasksCount.toLocaleString()} rows &middot; Excel &amp; Restore compatible)</span>
                 </div>
               </div>
 
@@ -322,13 +340,13 @@ export function AdminBackupRestoreModal({
               {/* File Preview */}
               {filePreview && (
                 <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-line-light dark:border-line-dark space-y-2 text-xs">
-                  <div className="flex items-center justify-between font-semibold">
+                  <div className="flex items-center justify-between font-semibold flex-wrap gap-1">
                     <span className="text-fg-light dark:text-fg-dark flex items-center gap-1.5">
                       <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
                       Valid Records Detected:
                     </span>
                     <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-                      {filePreview.totalRows} records
+                      {filePreview.totalRows.toLocaleString()} tasks ({filePreview.completedRows.toLocaleString()} completed)
                     </span>
                   </div>
                   {filePreview.detectedTechs.length > 0 && (

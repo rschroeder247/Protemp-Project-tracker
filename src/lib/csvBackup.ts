@@ -3,19 +3,27 @@ import { supabase, fetchAllTasks } from './supabase';
 export interface BackupProgressRecord {
   taskId: string;
   wbs: string;
+  outlineLevel: number;
+  isSummary: boolean;
   taskName: string;
   subprojectId: string;
   subprojectName: string;
+  parentTaskId: string;
+  sortOrder: number;
+  quotedHours: number;
+  durationDays: number;
+  notes: string;
+  status: 'Completed' | 'Pending' | 'Heading';
+  percentComplete: number;
   doneByName: string;
   tickedAt: string;
   savedAt: string;
-  quotedHours: number;
-  percentComplete: number;
 }
 
 export interface RestoreResult {
   success: boolean;
   totalInFile: number;
+  tasksRestoredCount: number;
   restoredCount: number;
   skippedCount: number;
   errors?: string[];
@@ -35,28 +43,29 @@ function escapeCsv(val: any): string {
 }
 
 /**
- * Generates full backup CSV text containing all completed progress records
+ * Generates full backup CSV text containing ALL project tasks (headings, pending, and completed)
  */
 export async function generateBackupCsv(): Promise<{
   csvText: string;
   recordCount: number;
+  completedCount: number;
   fileName: string;
 }> {
-  // 1. Fetch all progress records
+  // 1. Fetch all tasks across the entire project (all 3,961+ rows)
+  const allTasks = await fetchAllTasks(supabase);
+
+  // 2. Fetch all progress records
   const { data: progressList, error: pErr } = await supabase
     .from('tracker_task_progress')
-    .select('*')
-    .order('ticked_at', { ascending: false });
+    .select('*');
 
   if (pErr) {
     throw new Error(`Failed to load progress records: ${pErr.message}`);
   }
 
-  // 2. Fetch all tasks to enrich with WBS, TaskName, QuotedHours
-  const allTasks = await fetchAllTasks(supabase);
-  const taskMap = new Map<string, any>();
-  for (const t of allTasks) {
-    taskMap.set(t.id, t);
+  const progressMap = new Map<string, any>();
+  for (const p of progressList || []) {
+    progressMap.set(p.task_id, p);
   }
 
   // 3. Fetch projects to enrich with human-readable titles
@@ -71,44 +80,65 @@ export async function generateBackupCsv(): Promise<{
   const headers = [
     'TaskId',
     'WBS',
+    'OutlineLevel',
+    'IsSummary',
     'TaskName',
     'SubprojectId',
     'SubprojectName',
+    'ParentTaskId',
+    'SortOrder',
+    'QuotedHours',
+    'DurationDays',
+    'Notes',
+    'Status',
+    'PercentComplete',
     'DoneByName',
     'TickedAt',
     'SavedAt',
-    'QuotedHours',
-    'PercentComplete',
   ];
 
   const rows: string[] = [headers.map((h) => `"${h}"`).join(',')];
+  let completedCount = 0;
 
-  for (const p of progressList || []) {
-    const task = taskMap.get(p.task_id);
-    const subprojTitle = projectMap.get(p.project_id) || p.project_id || '';
+  for (const t of allTasks) {
+    const prog = progressMap.get(t.id);
+    if (prog) completedCount++;
+
+    const subprojTitle = projectMap.get(t.project_id) || t.project_id || '';
+    const isSummary = Boolean(t.is_summary);
+    const status = prog ? 'Completed' : isSummary ? 'Heading' : 'Pending';
+    const pct = prog ? 100 : 0;
 
     const row = [
-      escapeCsv(p.task_id),
-      escapeCsv(task?.wbs || ''),
-      escapeCsv(task?.name || ''),
-      escapeCsv(p.project_id || task?.project_id || ''),
+      escapeCsv(t.id),
+      escapeCsv(t.wbs || ''),
+      escapeCsv(t.outline_level ?? 1),
+      escapeCsv(isSummary ? 'Yes' : 'No'),
+      escapeCsv(t.name || ''),
+      escapeCsv(t.project_id || ''),
       escapeCsv(subprojTitle),
-      escapeCsv(p.done_by_name || ''),
-      escapeCsv(p.ticked_at || ''),
-      escapeCsv(p.saved_at || ''),
-      escapeCsv(task?.quoted_hours ? Number(task.quoted_hours) : 0),
-      escapeCsv(100),
+      escapeCsv(t.parent_task_id || ''),
+      escapeCsv(t.sort_order ?? 0),
+      escapeCsv(t.quoted_hours ? Number(t.quoted_hours) : 0),
+      escapeCsv(t.duration_days ? Number(t.duration_days) : 0),
+      escapeCsv(t.notes || ''),
+      escapeCsv(status),
+      escapeCsv(pct),
+      escapeCsv(prog?.done_by_name || ''),
+      escapeCsv(prog?.ticked_at || ''),
+      escapeCsv(prog?.saved_at || ''),
     ];
     rows.push(row.join(','));
   }
 
   const now = new Date();
   const dateStamp = now.toISOString().replace(/[:.]/g, '-').substring(0, 19);
-  const fileName = `protemp_backup_${dateStamp}.csv`;
+  const fileName = `protemp_full_backup_${dateStamp}.csv`;
 
   return {
     csvText: '\uFEFF' + rows.join('\r\n'),
-    recordCount: progressList ? progressList.length : 0,
+    recordCount: allTasks.length,
+    completedCount,
     fileName,
   };
 }
@@ -187,7 +217,7 @@ export function parseCsvRows(csvText: string): Array<Record<string, string>> {
 }
 
 /**
- * Restores progress records from CSV into tracker_task_progress
+ * Restores full project tasks and progress records from CSV into tracker_tasks & tracker_task_progress
  */
 export async function restoreProgressFromCsv(csvText: string): Promise<RestoreResult> {
   const rawRows = parseCsvRows(csvText);
@@ -195,13 +225,14 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
     return {
       success: false,
       totalInFile: 0,
+      tasksRestoredCount: 0,
       restoredCount: 0,
       skippedCount: 0,
-      message: 'No progress records found in CSV file. Please verify file format.',
+      message: 'No records found in CSV file. Please verify file format.',
     };
   }
 
-  // Pre-fetch tasks to validate and match task IDs
+  // Pre-fetch existing tasks to validate and match task IDs
   const allTasks = await fetchAllTasks(supabase);
   const taskIdSet = new Set(allTasks.map((t) => t.id));
   const taskWbsMap = new Map<string, string>(); // wbs -> task_id
@@ -211,12 +242,79 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
     taskProjectMap.set(t.id, t.project_id);
     if (t.wbs) {
       taskWbsMap.set(t.wbs.trim(), t.id);
-      // also composite key: project_id + '::' + wbs
       taskWbsMap.set(`${t.project_id}::${t.wbs.trim()}`, t.id);
     }
   }
 
-  const validRecords: Array<{
+  // 1. Check if CSV contains full task structure rows that can be upserted into tracker_tasks
+  const tasksToUpsert: Array<{
+    id: string;
+    project_id: string;
+    parent_task_id: string | null;
+    wbs: string;
+    outline_level: number;
+    name: string;
+    is_summary: boolean;
+    quoted_hours: number;
+    duration_days: number;
+    sort_order: number;
+    notes: string;
+  }> = [];
+
+  for (let i = 0; i < rawRows.length; i++) {
+    const row = rawRows[i];
+    const taskId = row.taskid || row.task_id || '';
+    const taskName = row.taskname || row.task_name || row.task || '';
+    const projectId =
+      row.subprojectid ||
+      row.subproject_id ||
+      row.projectid ||
+      row.project_id ||
+      '';
+
+    // If this row has full task definition columns (OutlineLevel or IsSummary)
+    if (taskId && taskName && projectId && ('outlinelevel' in row || 'issummary' in row)) {
+      const isSummaryRaw = (row.issummary || '').toLowerCase();
+      const isSummary = isSummaryRaw === 'yes' || isSummaryRaw === 'true' || isSummaryRaw === '1';
+
+      tasksToUpsert.push({
+        id: taskId,
+        project_id: projectId,
+        parent_task_id: row.parenttaskid ? row.parenttaskid : null,
+        wbs: row.wbs || '',
+        outline_level: Number(row.outlinelevel) || 1,
+        name: taskName,
+        is_summary: isSummary,
+        quoted_hours: Number(row.quotedhours) || 0,
+        duration_days: Number(row.durationdays) || 0,
+        sort_order: Number(row.sortorder) || i,
+        notes: row.notes || '',
+      });
+
+      taskIdSet.add(taskId);
+      taskProjectMap.set(taskId, projectId);
+    }
+  }
+
+  let tasksRestoredCount = 0;
+  const TASK_BATCH_SIZE = 500;
+  if (tasksToUpsert.length > 0) {
+    for (let b = 0; b < tasksToUpsert.length; b += TASK_BATCH_SIZE) {
+      const batch = tasksToUpsert.slice(b, b + TASK_BATCH_SIZE);
+      const { error: taskUpsertErr } = await supabase
+        .from('tracker_tasks')
+        .upsert(batch, { onConflict: 'id' });
+
+      if (taskUpsertErr) {
+        console.warn(`Task structure batch notice at ${b}:`, taskUpsertErr.message);
+      } else {
+        tasksRestoredCount += batch.length;
+      }
+    }
+  }
+
+  // 2. Collect completed progress records to upsert into tracker_task_progress
+  const validProgressRecords: Array<{
     task_id: string;
     project_id: string;
     done_by_name: string;
@@ -230,13 +328,31 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
   for (let i = 0; i < rawRows.length; i++) {
     const row = rawRows[i];
 
-    // Identify task ID directly or through WBS fallback
-    let resolvedTaskId =
-      row.taskid ||
-      row.task_id ||
-      row.task ||
+    // Check if this row represents a completed stage
+    const statusRaw = (row.status || '').toLowerCase();
+    const pctRaw = row.percentcomplete !== undefined && row.percentcomplete !== '' ? Number(row.percentcomplete) : null;
+    const doneByRaw =
+      row.donebyname ||
+      row.done_by_name ||
+      row.doneby ||
+      row.done_by ||
+      row.technician ||
+      row.persons ||
       '';
+    const tickedAtRaw = row.tickedat || row.ticked_at || row.completeddate || row.date || '';
 
+    // In a full 3,961-task backup, pending and heading rows have status="Pending"/"Heading" and PercentComplete=0
+    const isExplicitlyUncompleted =
+      statusRaw === 'pending' ||
+      statusRaw === 'heading' ||
+      (pctRaw !== null && pctRaw === 0 && !doneByRaw && !tickedAtRaw);
+
+    if (isExplicitlyUncompleted) {
+      continue;
+    }
+
+    // Identify task ID directly or through WBS fallback
+    let resolvedTaskId = row.taskid || row.task_id || row.task || '';
     const wbs = row.wbs || '';
     const projectId =
       row.subprojectid ||
@@ -247,7 +363,6 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
       '';
 
     if (!resolvedTaskId && wbs) {
-      // Lookup by project + wbs, then by wbs alone
       resolvedTaskId =
         taskWbsMap.get(`${projectId}::${wbs}`) ||
         taskWbsMap.get(wbs) ||
@@ -257,25 +372,18 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
     if (!resolvedTaskId || !taskIdSet.has(resolvedTaskId)) {
       skipped++;
       if (errors.length < 5) {
-        errors.push(`Row ${i + 2}: Task ID "${resolvedTaskId || wbs}" not found in current project plan.`);
+        errors.push(`Row ${i + 2}: Task ID "${resolvedTaskId || wbs}" not found in project plan.`);
       }
       continue;
     }
 
-    const finalProjectId = projectId || taskProjectMap.get(resolvedTaskId) || 'avi-line-4---e-i-site-installation';
-    const doneBy =
-      row.donebyname ||
-      row.done_by_name ||
-      row.doneby ||
-      row.done_by ||
-      row.technician ||
-      row.persons ||
-      'Admin Restore';
+    const finalProjectId =
+      projectId || taskProjectMap.get(resolvedTaskId) || 'avi-line-4---e-i-site-installation';
+    const doneBy = doneByRaw || 'Admin Restore';
 
-    const rawTickedAt = row.tickedat || row.ticked_at || row.completeddate || row.date;
     let tickedAt = new Date().toISOString();
-    if (rawTickedAt) {
-      const parsedDate = new Date(rawTickedAt);
+    if (tickedAtRaw) {
+      const parsedDate = new Date(tickedAtRaw);
       if (!isNaN(parsedDate.getTime())) {
         tickedAt = parsedDate.toISOString();
       }
@@ -290,7 +398,7 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
       }
     }
 
-    validRecords.push({
+    validProgressRecords.push({
       task_id: resolvedTaskId,
       project_id: finalProjectId,
       done_by_name: doneBy,
@@ -299,23 +407,24 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
     });
   }
 
-  if (validRecords.length === 0) {
+  if (validProgressRecords.length === 0 && tasksRestoredCount === 0) {
     return {
       success: false,
       totalInFile: rawRows.length,
+      tasksRestoredCount: 0,
       restoredCount: 0,
       skippedCount: skipped,
       errors,
-      message: 'No matching tasks could be resolved from CSV to restore.',
+      message: 'No matching tasks or completed progress records could be resolved from CSV.',
     };
   }
 
-  // Upsert in batches of 250 to avoid request size limits
+  // Upsert completed progress in batches of 250
   const BATCH_SIZE = 250;
   let restored = 0;
 
-  for (let b = 0; b < validRecords.length; b += BATCH_SIZE) {
-    const batch = validRecords.slice(b, b + BATCH_SIZE);
+  for (let b = 0; b < validProgressRecords.length; b += BATCH_SIZE) {
+    const batch = validProgressRecords.slice(b, b + BATCH_SIZE);
     const { error: upsertErr } = await supabase
       .from('tracker_task_progress')
       .upsert(batch, { onConflict: 'task_id' });
@@ -326,12 +435,19 @@ export async function restoreProgressFromCsv(csvText: string): Promise<RestoreRe
     restored += batch.length;
   }
 
+  const parts: string[] = [];
+  if (tasksRestoredCount > 0) {
+    parts.push(`${tasksRestoredCount.toLocaleString()} project tasks`);
+  }
+  parts.push(`${restored.toLocaleString()} completed progress records`);
+
   return {
     success: true,
     totalInFile: rawRows.length,
+    tasksRestoredCount,
     restoredCount: restored,
     skippedCount: skipped,
     errors: errors.length > 0 ? errors : undefined,
-    message: `Successfully restored ${restored} progress records${skipped > 0 ? ` (${skipped} skipped/unmatched)` : ''}.`,
+    message: `Successfully restored ${parts.join(' and ')}${skipped > 0 ? ` (${skipped} skipped)` : ''}.`,
   };
 }

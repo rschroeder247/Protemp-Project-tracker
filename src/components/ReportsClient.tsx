@@ -2116,6 +2116,7 @@ export function ReportsClient({
             await handleRefresh();
           }}
           currentCompletedCount={dbProgress.length}
+          totalTasksCount={dbTasks.length}
           initialTab={backupRestoreInitialTab}
         />
       )}

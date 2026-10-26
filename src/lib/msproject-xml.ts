@@ -96,9 +96,14 @@ function extractTasksFromXmlProject(
 
           // Preserve exact task_${uid} for original Site Installation so existing DB progress records match,
           // while prefixing other subprojects to avoid UID collisions.
+          // Legacy subprojects keep their 8-char prefix (existing progress records depend on it).
+          // Newer subprojects use a longer prefix to avoid collisions (e.g. two "avi-line..." projects).
+          const isLegacyPrefix =
+            spId === 'avi-line4-instrument-connection-plan' || spId.startsWith('p7340');
+          const idPrefix = isLegacyPrefix ? spId.substring(0, 8) : spId.substring(0, 32);
           const taskId = isOriginalSiteInstallation
             ? `task_${uid}`
-            : `task_${spId.substring(0, 8)}_${uid}`;
+            : `task_${idPrefix}_${uid}`;
 
           tasks.push({
             id: taskId,

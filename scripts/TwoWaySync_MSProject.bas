@@ -139,6 +139,51 @@ Public Sub BackupXmlWithRotation(ByVal xmlPath As String, Optional ByVal maxBack
 End Sub
 
 ' -------------------------------------------------------------------------
+' PER-SUBPROJECT XML EXPORT: writes each linked subproject .mpp to
+' MS Project\Subprojects\<name>.xml so the web sync never depends on
+' the Master being expanded.
+' -------------------------------------------------------------------------
+Public Sub ExportSubprojectXmls(Optional ByVal pj As Object = Nothing)
+    On Error Resume Next
+    Dim masterProj As Object
+    Set masterProj = IIf(pj Is Nothing, Application.ActiveProject, pj)
+    If masterProj Is Nothing Then Exit Sub
+
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim subFolder As String
+    subFolder = Environ$("USERPROFILE") & "\OneDrive - Protemp\Protemp Operations\MS Project\Subprojects"
+    If Not fso.FolderExists(subFolder) Then fso.CreateFolder subFolder
+
+    ' Collect paths first (opening files changes the active project)
+    Dim paths As New Collection
+    Dim sp As Object
+    For Each sp In masterProj.Subprojects
+        If Not sp Is Nothing Then
+            If Len(sp.Path) > 0 Then
+                If fso.FileExists(sp.Path) Then paths.Add sp.Path
+            End If
+        End If
+    Next sp
+
+    Application.DisplayAlerts = False
+    Dim p As Variant
+    Dim xmlOut As String
+    For Each p In paths
+        xmlOut = fso.BuildPath(subFolder, fso.GetBaseName(CStr(p)) & ".xml")
+        Err.Clear
+        Application.FileOpenEx Name:=CStr(p), ReadOnly:=True
+        If Err.Number = 0 Then
+            Application.FileSaveAs Name:=xmlOut, FormatID:="MSProject.XML"
+            Application.FileCloseEx Save:=pjDoNotSave
+        End If
+    Next p
+    Application.DisplayAlerts = True
+
+    masterProj.Activate
+End Sub
+
+' -------------------------------------------------------------------------
 ' DIRECTION 0: Auto-Save XML when Project is Saved (with rolling backup & subprojects update)
 ' -------------------------------------------------------------------------
 Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optional ByVal isSilent As Boolean = True)
@@ -191,6 +236,9 @@ Public Sub AutoExportProjectToXml(Optional ByVal pj As Object = Nothing, Optiona
     
     ' 4. Ensure original subprojects are also saved
     SaveAllOpenSubprojects pj:=activeProj
+    
+    ' 5. Export each subproject to its own XML (sync no longer needs Master expanded)
+    ExportSubprojectXmls
     
     ' Update status bar
     On Error Resume Next
@@ -273,6 +321,9 @@ Public Sub SaveMasterAndExportXml()
     
     ' 7. Also save all subprojects
     SaveAllOpenSubprojects
+    
+    ' 8. Export each subproject to its own XML
+    ExportSubprojectXmls
     
     On Error Resume Next
     Application.StatusBar = "Protemp Tracker: Saved MPP, updated subprojects & exported XML to " & xmlPath

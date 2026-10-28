@@ -164,6 +164,34 @@ export async function getOneDriveFileMetadata(
 }
 
 /**
+ * Lists XML files in the "MS Project/Subprojects" folder (exported per-subproject by the VBA macro).
+ */
+export async function listSubprojectXmlFiles(): Promise<OneDriveFileMetadata[]> {
+  const token = await getGraphAccessToken();
+  try {
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/drives/${KNOWN_DRIVE_ID}/root:/Protemp%20Operations/MS%20Project/Subprojects:/children?$top=200`,
+      { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.value || [])
+      .filter((f: any) => f.file && /\.xml$/i.test(f.name || ''))
+      .map((f: any) => ({
+        id: f.id,
+        driveId: KNOWN_DRIVE_ID,
+        name: f.name,
+        size: f.size || 0,
+        eTag: f.eTag || '',
+        lastModifiedDateTime: f.lastModifiedDateTime,
+        webUrl: f.webUrl,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Direct file content downloader by driveId and itemId
  */
 export async function downloadFileContentByItem(

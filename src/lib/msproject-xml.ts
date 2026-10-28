@@ -188,3 +188,54 @@ export function parseMsProjectXml(xmlContent: string): {
 
   return extractTasksFromXmlProject(project, 'Master Project');
 }
+
+/**
+ * Parses the Master Project XML and fills in any collapsed subprojects using
+ * separately exported subproject XML files (keyed by .mpp base name, case-insensitive).
+ * This means the Master does not need to be expanded before saving.
+ */
+export function parseMasterWithSubprojectXmls(
+  masterXml: string,
+  subprojectXmls: Record<string, string>
+): { projectName: string; tasks: RawProjectTask[]; filledSubprojects: string[] } {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    textNodeName: '#text',
+  });
+
+  const parsed = parser.parse(masterXml);
+  const project = parsed.Project || parsed;
+  const lookup = new Map<string, string>();
+  for (const [k, v] of Object.entries(subprojectXmls)) {
+    lookup.set(k.toLowerCase().replace(/\.(xml|mpp)$/i, ''), v);
+  }
+
+  const filledSubprojects: string[] = [];
+  const rawTasks = project.Tasks?.Task;
+  const taskList = rawTasks ? (Array.isArray(rawTasks) ? rawTasks : [rawTasks]) : [];
+
+  for (const t of taskList) {
+    const isSub = String(t.IsSubproject) === '1';
+    const hasNested = t.Project && t.Project.Tasks?.Task;
+    if (!isSub || hasNested || !t.SubprojectName) continue;
+
+    const baseName = String(t.SubprojectName)
+      .split(/[\\/]/)
+      .pop()!
+      .replace(/\.(mpp|xml)$/i, '')
+      .toLowerCase();
+    const subXml = lookup.get(baseName);
+    if (!subXml) continue;
+
+    const subParsed = parser.parse(subXml);
+    const subProject = subParsed.Project || subParsed;
+    if (subProject?.Tasks?.Task) {
+      t.Project = subProject;
+      filledSubprojects.push(String(t.Name || baseName));
+    }
+  }
+
+  const result = extractTasksFromXmlProject(project, 'Master Project');
+  return { ...result, filledSubprojects };
+}

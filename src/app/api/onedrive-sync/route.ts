@@ -3,8 +3,9 @@ import {
   getOneDriveFileMetadata,
   downloadFileContentByItem,
   downloadFileFromOneDrive,
+  listSubprojectXmlFiles,
 } from '@/lib/ms-graph';
-import { parseMsProjectXml } from '@/lib/msproject-xml';
+import { parseMasterWithSubprojectXmls } from '@/lib/msproject-xml';
 import { syncProjectTreeToSupabase } from '@/lib/msproject';
 import { createClient } from '@supabase/supabase-js';
 
@@ -42,6 +43,11 @@ export async function POST(req: NextRequest) {
 
     // 1. OPTION 1: Ultra-fast metadata check (~200ms) to detect if file changed
     const meta = await getOneDriveFileMetadata(fileName);
+    const subFiles = meta ? await listSubprojectXmlFiles() : [];
+    const subSignature = subFiles
+      .map((f) => `${f.name}:${f.eTag}`)
+      .sort()
+      .join('|');
 
     if (meta && !force) {
       const { data: settingRow } = await supabase
@@ -55,7 +61,8 @@ export async function POST(req: NextRequest) {
         saved &&
         saved.fileName === fileName &&
         saved.lastModifiedDateTime === meta.lastModifiedDateTime &&
-        saved.eTag === meta.eTag
+        saved.eTag === meta.eTag &&
+        (saved.subSignature || '') === subSignature
       ) {
         // File has NOT changed since last sync: skip download & DB write!
         return NextResponse.json({
@@ -84,13 +91,23 @@ export async function POST(req: NextRequest) {
       lastModifiedDateTime = fallback.lastModifiedDateTime;
     }
 
-    // 3. Parse MS Project XML
-    const parsed = parseMsProjectXml(content);
+    // 3. Parse MS Project XML (filling collapsed subprojects from per-subproject XML exports)
+    const subXmls: Record<string, string> = {};
+    await Promise.all(
+      subFiles.map(async (f) => {
+        try {
+          subXmls[f.name] = await downloadFileContentByItem(f.driveId, f.id);
+        } catch {
+          // skip unreadable file
+        }
+      })
+    );
+    const parsed = parseMasterWithSubprojectXmls(content, subXmls);
 
     if (!parsed.tasks || parsed.tasks.length < 5) {
       return NextResponse.json(
         {
-          error: `MS Project XML contains only ${parsed.tasks?.length || 0} tasks. Subprojects appear to be collapsed in MS Project. Please expand all subprojects and re-save Master Project.xml.`,
+          error: `MS Project XML contains only ${parsed.tasks?.length || 0} tasks and no subproject XML files were found in "MS Project\\Subprojects". Please save Master Project in MS Project (with the updated macro) so subproject XMLs are exported.`,
         },
         { status: 400 }
       );
@@ -113,6 +130,7 @@ export async function POST(req: NextRequest) {
           eTag: meta?.eTag || '',
           lastModifiedDateTime: meta?.lastModifiedDateTime || lastModifiedDateTime,
           taskCount: result.count,
+          subSignature,
           lastSyncedAt: new Date().toISOString(),
         },
         updated_at: new Date().toISOString(),
